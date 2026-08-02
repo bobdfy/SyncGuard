@@ -1,0 +1,7 @@
+.env
+syncguard.exe
+syncguard
+.idea/
+.vscode/
+*.swp
+Thumbs.db
