@@ -2,69 +2,107 @@ package main
 
 import (
 	"context"
-	"flag"
 	"log"
 	"os"
 	"os/signal"
-	"time"
 
-	"github.com/bobdfy/syncguard/internal/engine"
+	"github.com/bobdfy/syncguard/internal/handler"
+	"github.com/bobdfy/syncguard/internal/middleware"
+	"github.com/bobdfy/syncguard/internal/mq"
 	"github.com/bobdfy/syncguard/internal/repository"
-	"github.com/bobdfy/syncguard/internal/source/mock"
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// 1. 加载 .env 文件
 	godotenv.Load()
 
-	// 2. 解析命令行参数
-	var (
-		taskName  string
-		pageSize  int
-		totalRecs int
-	)
-	flag.StringVar(&taskName, "taskName", "mock_sync", "同步任务名称")
-	flag.IntVar(&pageSize, "pageSize", 100, "每页条数")
-	flag.IntVar(&totalRecs, "totalRecs", 10000, "数据总条数")
-	flag.Parse()
-
-	// 3. 读环境变量 DATABASE_URL
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Fatal("databaseURL 未设置")
+		log.Fatal("DATABASE_URL 未设置")
 	}
 
-	// 4. 创建带超时的 context，Ctrl+C 取消
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
-	go func() {
-		<-sigCh
-		log.Println("收到中断信息...")
-		cancel()
-	}()
-
-	// 5. 创建数据库连接池
-	db, err := repository.NewDB(ctx, databaseURL)
+	db, err := repository.NewDB(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
 	}
 	defer db.Close()
 
-	// 6. 创建 Source（Mock 数据源）
-	src := mock.NewGenerator(totalRecs)
+	// 创建 Store
+	userStore := repository.NewUserStore(db)
+	connStore := repository.NewConnectionStore(db)
+	jobStore := repository.NewJobStore(db)
 
-	// 7. 创建 Destination（PostgreSQL 存储）
-	dst := repository.NewSyncedStore(db)
-
-	// 8. 组装引擎
-	eng := engine.New(src, dst, pageSize)
-
-	// 9. 跑同步
-	if err := eng.Run(ctx, taskName); err != nil {
-		log.Printf("同步失败: %v ", err)
-		os.Exit(1)
+	// ========== V2：连接 RabbitMQ，创建 Producer ==========
+	// 从 .env 读取 RabbitMQ 地址
+	rabbitURL := os.Getenv("RABBITMQ_URL")
+	if rabbitURL == "" {
+		log.Fatal("RABBITMQ_URL 未设置")
 	}
+
+	// 拨号 + 声明拓扑（交换机、队列、死信队列）
+	conn, ch, err := mq.Connect(rabbitURL)
+	if err != nil {
+		log.Fatalf("RabbitMQ 连接失败: %v", err)
+	}
+	defer conn.Close()
+	defer ch.Close()
+
+	// 创建 Producer，往主交换机发消息
+	producer := mq.NewProducer(ch, mq.ExchangeName, mq.RoutingKey)
+
+	// 创建 Handler（V2：JobHandler 多了 Producer 参数）
+	authHandler := handler.NewAuthHandler(userStore)
+	connHandler := handler.NewConnectionHandler(connStore)
+	jobHandler := handler.NewJobHandler(jobStore, db, producer)
+
+	r := gin.Default()
+
+	// ========== 公开 API ==========
+	r.POST("/api/register", authHandler.Register)
+	r.POST("/api/login", authHandler.Login)
+
+	// ========== 需要认证的 API ==========
+	api := r.Group("/api")
+	api.Use(middleware.AuthRequired())
+	{
+		api.GET("/logout", authHandler.Logout)
+
+		// 数据源 CRUD
+		api.GET("/connections", connHandler.ListConnections)
+		api.POST("/connections", connHandler.CreateConnection)
+		api.PUT("/connections/:id", connHandler.UpdateConnection)
+		api.DELETE("/connections/:id", connHandler.DeleteConnection)
+
+		// 同步任务 CRUD
+		api.GET("/jobs", jobHandler.ListJobs)
+		api.POST("/jobs", jobHandler.CreateJob)
+		api.GET("/jobs/:id", jobHandler.GetJob)
+		api.DELETE("/jobs/:id", jobHandler.DeleteJob)
+
+		api.POST("/jobs/:id/run", jobHandler.RunJob)
+
+		api.GET("/records", jobHandler.ListRecords)
+	}
+
+	// ========== 静态文件（前端页面） ==========
+	r.Static("/static", "./web")
+	r.StaticFile("/", "./web/login.html")
+
+	// 启动 HTTP 服务
+	go func() {
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "9090"
+		}
+		if err := r.Run(":" + port); err != nil {
+			log.Fatalf("服务启动失败: %v", err)
+		}
+	}()
+	log.Println("SyncGuard 已启动: http://localhost: + PORT ")
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Println("正在关闭...")
 }

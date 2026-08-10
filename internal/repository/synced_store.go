@@ -127,3 +127,27 @@ func (s *SyncedStore) CompleteBatch(ctx context.Context, batchID int64, status s
 	}
 	return nil
 }
+
+// ListRecords 查询 synced_records 表，返回已同步的记录
+// limit 控制最多返回条数，按 id 升序排列
+func (s *SyncedStore) ListRecords(ctx context.Context, limit, offset int) ([]model.Record, error) {
+	rows, err := s.db.Pool().Query(ctx,
+		`SELECT id, version, updated_at, data
+		 FROM synced_records ORDER BY id LIMIT $1 OFFSET $2`,
+		limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListRecords: %w", err)
+	}
+	defer rows.Close()
+
+	var records []model.Record
+	for rows.Next() {
+		var r model.Record
+		if err := rows.Scan(&r.ID, &r.Version, &r.UpdatedAt, &r.Data); err != nil {
+			return nil, fmt.Errorf("ListRecords scan: %w", err)
+		}
+		records = append(records, r)
+	}
+	return records, nil
+}

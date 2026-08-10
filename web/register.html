@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncGuard — 注册</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root { --pico-font-size: 100%; }
+        body { min-height: 100vh; display: flex; align-items: center; }
+        .logo { text-align: center; margin-bottom: 1.5rem; }
+        .logo h1 { margin-bottom: 0.25rem; }
+        .logo p  { color: var(--pico-muted-color); }
+        #error { color: var(--pico-del-color); text-align: center; display: none; }
+    </style>
+</head>
+<body>
+    <main class="container" style="max-width: 420px;">
+        <div class="logo">
+            <h1>🛡 SyncGuard</h1>
+            <p>创建你的账号</p>
+        </div>
+        <article>
+            <header><strong>注册</strong></header>
+            <p id="error"></p>
+            <form>
+                <label>用户名
+                    <input type="text" name="username" placeholder="请输入用户名" required autofocus>
+                </label>
+                <label>密码
+                    <input type="password" name="password" placeholder="请设置密码" required>
+                </label>
+                <label>确认密码
+                    <input type="password" name="password_confirm" placeholder="请再次输入密码" required>
+                </label>
+                <button type="submit" style="width:100%;">注 册</button>
+            </form>
+            <footer style="text-align:center;">
+                <small>已有账号？<a href="/static/login.html">去登录</a></small>
+            </footer>
+        </article>
+    </main>
+
+    <script>
+    const form = document.querySelector('form');
+    const errorEl = document.getElementById('error');
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorEl.style.display = 'none';
+
+        const formData = new FormData(form);
+
+        if (formData.get('password') !== formData.get('password_confirm')) {
+            errorEl.textContent = '两次密码不一致';
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        const params = new URLSearchParams(formData);
+
+        try {
+            const res = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params,
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                errorEl.textContent = data.error || '注册失败';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('username', data.username);
+            window.location.href = '/static/home.html';
+        } catch (err) {
+            errorEl.textContent = '无法连接后端，请确认服务已启动';
+            errorEl.style.display = 'block';
+        }
+    });
+    </script>
+</body>
+</html>

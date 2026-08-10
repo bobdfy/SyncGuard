@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncGuard — 数据源</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root { --pico-font-size: 100%; }
+        #form-error { color: var(--pico-del-color); display: none; }
+        #form-ok    { color: var(--pico-ins-color); display: none; }
+        #cancel-edit-btn { display: none; }
+        .action-btn { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <header class="container">
+        <nav>
+            <ul><li><strong>🛡 SyncGuard</strong></li></ul>
+            <ul>
+                <li><a href="/static/home.html">首页</a></li>
+                <li><a href="#" aria-current="page">数据源</a></li>
+                <li><a href="/static/jobs.html">同步任务</a></li>
+                <li><a href="/static/records.html">同步结果</a></li>
+                <li><a href="#" id="logout-btn" class="secondary">退出</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main class="container">
+        <hgroup>
+            <h1>🔗 数据源管理</h1>
+            <p>添加或管理你的数据源连接</p>
+        </hgroup>
+
+        <details open>
+            <summary><strong id="form-title">➕ 添加新数据源</strong></summary>
+            <p id="form-error"></p>
+            <p id="form-ok"></p>
+            <form style="margin-top:1rem;">
+                <input type="hidden" name="edit_id">
+                <div class="grid">
+                    <label>名称
+                        <input type="text" name="name" placeholder="例如：生产环境 MySQL" required>
+                    </label>
+                    <label>类型
+                        <select name="source_type" required>
+                            <option value="" selected disabled>— 请选择 —</option>
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL</option>
+                            <option value="mongodb">MongoDB</option>
+                            <option value="api">REST API</option>
+                        </select>
+                    </label>
+                </div>
+                <label>连接地址
+                    <input type="text" name="source_url" placeholder="postgres://user:pass@host:5432/db" required>
+                </label>
+                <div class="grid">
+                    <button type="submit" id="submit-btn">添加数据源</button>
+                    <button type="button" id="cancel-edit-btn" class="secondary">取消编辑</button>
+                </div>
+            </form>
+        </details>
+
+        <h2 style="margin-top:2rem;">已有数据源</h2>
+        <table class="striped">
+            <thead>
+                <tr><th>名称</th><th>类型</th><th>地址</th><th>创建时间</th><th>操作</th></tr>
+            </thead>
+            <tbody id="conn-tbody">
+                <tr><td colspan="5" style="text-align:center;color:var(--pico-muted-color);">加载中...</td></tr>
+            </tbody>
+        </table>
+    </main>
+
+    <script>
+    // ========== 认证检查 ==========
+    const token = localStorage.getItem('token');
+    if (!token) { window.location.href = '/static/login.html'; }
+
+    document.getElementById('logout-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        window.location.href = '/static/login.html';
+    });
+
+    // ========== DOM 引用 ==========
+    const form        = document.querySelector('form');
+    const errEl       = document.getElementById('form-error');
+    const okEl        = document.getElementById('form-ok');
+    const tbody       = document.getElementById('conn-tbody');
+    const submitBtn   = document.getElementById('submit-btn');
+    const cancelBtn   = document.getElementById('cancel-edit-btn');
+    const formTitle   = document.getElementById('form-title');
+    const editIdInput = document.querySelector('input[name="edit_id"]');
+
+    let editingId = null; // null = 新建模式，有值 = 编辑模式
+
+    // ========== 加载列表 ==========
+    async function loadConnections() {
+        try {
+            const res = await fetch('/api/connections', {
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--pico-del-color);">${data.error || '加载失败'}</td></tr>`;
+                return;
+            }
+
+            const list = data.data || [];
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--pico-muted-color);">暂无数据源，在上方添加第一个</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map(c => `
+                <tr>
+                    <td>${escapeHtml(c.name)}</td>
+                    <td>${escapeHtml(c.source_type)}</td>
+                    <td><small>${escapeHtml(c.source_url)}</small></td>
+                    <td><small>${formatTime(c.created_at)}</small></td>
+                    <td>
+                        <button class="action-btn" onclick="startEdit(${c.id}, '${escapeHtml(c.name)}', '${escapeHtml(c.source_type)}', '${escapeHtml(c.source_url)}')">✏️ 编辑</button>
+                        <button class="action-btn secondary" onclick="deleteConn(${c.id})">🗑 删除</button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--pico-del-color);">网络错误</td></tr>';
+        }
+    }
+
+    // ========== 提交表单（创建 / 更新） ==========
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errEl.style.display = 'none';
+        okEl.style.display = 'none';
+
+        const body = {
+            name:        form.name.value,
+            source_type: form.source_type.value,
+            source_url:  form.source_url.value,
+        };
+
+        const url    = editingId ? `/api/connections/${editingId}` : '/api/connections';
+        const method = editingId ? 'PUT' : 'POST';
+
+        try {
+            const res = await fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token,
+                },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                errEl.textContent = data.error || '操作失败';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            okEl.textContent = editingId ? '更新成功！' : '添加成功！';
+            okEl.style.display = 'block';
+            resetForm();
+            loadConnections();
+        } catch (err) {
+            errEl.textContent = '网络错误，请确认后端已启动';
+            errEl.style.display = 'block';
+        }
+    });
+
+    // ========== 编辑 ==========
+    function startEdit(id, name, sourceType, sourceURL) {
+        editingId = id;
+        editIdInput.value = id;
+        form.name.value = name;
+        form.source_type.value = sourceType;
+        form.source_url.value = sourceURL;
+
+        formTitle.textContent = '✏️ 编辑数据源';
+        submitBtn.textContent = '更新数据源';
+        cancelBtn.style.display = 'inline-block';
+        errEl.style.display = 'none';
+        okEl.style.display = 'none';
+    }
+
+    cancelBtn.addEventListener('click', resetForm);
+
+    function resetForm() {
+        editingId = null;
+        editIdInput.value = '';
+        form.reset();
+        formTitle.textContent = '➕ 添加新数据源';
+        submitBtn.textContent = '添加数据源';
+        cancelBtn.style.display = 'none';
+    }
+
+    // ========== 删除 ==========
+    async function deleteConn(id) {
+        if (!confirm('确定删除这个数据源吗？')) return;
+
+        try {
+            const res = await fetch(`/api/connections/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                alert(data.error || '删除失败');
+                return;
+            }
+            loadConnections();
+        } catch (err) {
+            alert('网络错误');
+        }
+    }
+
+    // ========== 工具函数 ==========
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function formatTime(t) {
+        if (!t) return '';
+        return new Date(t).toLocaleString('zh-CN');
+    }
+
+    // ========== 页面初始化 ==========
+    loadConnections();
+    </script>
+</body>
+</html>

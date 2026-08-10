@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncGuard — 首页</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root { --pico-font-size: 100%; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .stats article { margin: 0; text-align: center; }
+        .stats article h2 { margin: 0; font-size: 2rem; }
+        .stats article p  { margin: 0; color: var(--pico-muted-color); font-size: 0.9rem; }
+        .quick-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <header class="container">
+        <nav>
+            <ul><li><strong>🛡 SyncGuard</strong></li></ul>
+            <ul>
+                <li><a href="#" aria-current="page">首页</a></li>
+                <li><a href="/static/connections.html">数据源</a></li>
+                <li><a href="/static/jobs.html">同步任务</a></li>
+                <li><a href="/static/records.html">同步结果</a></li>
+                <li><a href="#" id="logout-btn" class="secondary">退出</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main class="container">
+        <hgroup>
+            <h1>👋 欢迎回来，<span id="username-display"></span></h1>
+            <p>概览你的数据同步状态</p>
+        </hgroup>
+
+        <div class="stats">
+            <article>
+                <h2>0</h2>
+                <p>数据源</p>
+            </article>
+            <article>
+                <h2>0</h2>
+                <p>今日同步</p>
+            </article>
+            <article>
+                <h2>0</h2>
+                <p>总任务数</p>
+            </article>
+            <article>
+                <h2>—</h2>
+                <p>最近状态</p>
+            </article>
+        </div>
+
+        <div class="quick-actions">
+            <a href="/static/connections.html" role="button">➕ 添加数据源</a>
+            <a href="/static/jobs.html" role="button" class="secondary">📋 查看任务</a>
+        </div>
+    </main>
+
+    <script>
+    if (!localStorage.getItem('token')) {
+        window.location.href = '/static/login.html';
+    }
+
+    document.getElementById('username-display').textContent = localStorage.getItem('username') || '';
+
+    document.getElementById('logout-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        window.location.href = '/static/login.html';
+    });
+    </script>
+</body>
+</html>

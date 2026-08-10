@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncGuard — 同步结果</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root { --pico-font-size: 100%; }
+        .data-preview { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <header class="container">
+        <nav>
+            <ul><li><strong>🛡 SyncGuard</strong></li></ul>
+            <ul>
+                <li><a href="/static/home.html">首页</a></li>
+                <li><a href="/static/connections.html">数据源</a></li>
+                <li><a href="/static/jobs.html">同步任务</a></li>
+                <li><a href="#" aria-current="page">同步结果</a></li>
+                <li><a href="#" id="logout-btn" class="secondary">退出</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main class="container">
+        <hgroup>
+            <h1>📦 同步结果</h1>
+            <p>已同步到目标端的数据记录</p>
+        </hgroup>
+
+        <div class="grid" style="margin-bottom:1rem;">
+            <label>每页条数
+                <select id="limit-select">
+                    <option value="20">20</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+            </label>
+            <label style="align-self:flex-end;">
+                <button id="refresh-btn">🔄 刷新</button>
+            </label>
+        </div>
+
+        <table class="striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>版本</th>
+                    <th>更新时间</th>
+                    <th>数据内容</th>
+                </tr>
+            </thead>
+            <tbody id="record-tbody">
+                <tr><td colspan="4" style="text-align:center;color:var(--pico-muted-color);">加载中...</td></tr>
+            </tbody>
+        </table>
+
+        <div class="grid" style="margin-top:1rem;">
+            <button id="prev-btn">← 上一页</button>
+            <span id="page-info" style="text-align:center;line-height:2.5;">第 1 页</span>
+            <button id="next-btn">下一页 →</button>
+        </div>
+    </main>
+
+    <script>
+    // ========== 认证检查 ==========
+    const token = localStorage.getItem('token');
+    if (!token) { window.location.href = '/static/login.html'; }
+
+    document.getElementById('logout-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        window.location.href = '/static/login.html';
+    });
+
+    // ========== DOM 引用 ==========
+    const tbody   = document.getElementById('record-tbody');
+    const limitSel = document.getElementById('limit-select');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const pageInfo = document.getElementById('page-info');
+
+    let offset = 0;
+
+    // ========== 加载同步结果 ==========
+    async function loadRecords() {
+        const limit = parseInt(limitSel.value);
+        try {
+            const res = await fetch(`/api/records?limit=${limit}&offset=${offset}`, {
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--pico-del-color);">${data.error || '加载失败'}</td></tr>`;
+                return;
+            }
+
+            const list = data.data || [];
+            if (list.length === 0 && offset === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--pico-muted-color);">暂无同步数据，请先启动一个同步任务</td></tr>';
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
+                return;
+            }
+
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--pico-muted-color);">已是最后一页</td></tr>';
+                prevBtn.disabled = false;
+                nextBtn.disabled = true;
+                return;
+            }
+
+            tbody.innerHTML = list.map(r => `
+                <tr>
+                    <td><code>${escapeHtml(r.ID)}</code></td>
+                    <td>v${r.Version}</td>
+                    <td><small>${formatTime(r.UpdatedAt)}</small></td>
+                    <td><span class="data-preview" title="${escapeHtml(JSON.stringify(r.Data))}">${escapeHtml(JSON.stringify(r.Data))}</span></td>
+                </tr>
+            `).join('');
+
+            if (list.length < limit) { nextBtn.disabled = true; } else { nextBtn.disabled = false; }
+            prevBtn.disabled = (offset === 0);
+            pageInfo.textContent = `第 ${Math.floor(offset / limit) + 1} 页`;
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--pico-del-color);">网络错误</td></tr>';
+        }
+    }
+
+    // ========== 事件绑定 ==========
+    limitSel.addEventListener("change", () => { offset = 0; loadRecords(); });
+    refreshBtn.addEventListener("click", () => { offset = 0; loadRecords(); });
+    prevBtn.addEventListener("click", () => {
+        const limit = parseInt(limitSel.value);
+        if (offset >= limit) { offset -= limit; loadRecords(); }
+    });
+    nextBtn.addEventListener("click", () => {
+        const limit = parseInt(limitSel.value);
+        offset += limit;
+        loadRecords();
+    });
+
+    // ========== 工具函数 ==========
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function formatTime(t) {
+        if (!t) return '-';
+        return new Date(t).toLocaleString('zh-CN');
+    }
+
+    // ========== 初始化 ==========
+    loadRecords();
+    </script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncGuard — 同步任务</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root { --pico-font-size: 100%; }
+        #form-error { color: var(--pico-del-color); display: none; }
+        #form-ok    { color: var(--pico-ins-color); display: none; }
+        .badge { padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
+        .badge-pending   { background: var(--pico-muted-color); color: #fff; }
+        .badge-running   { background: var(--pico-primary); color: #fff; }
+        .badge-completed { background: var(--pico-ins-color); color: #fff; }
+        .badge-failed    { background: var(--pico-del-color); color: #fff; }
+    </style>
+</head>
+<body>
+    <header class="container">
+        <nav>
+            <ul><li><strong>🛡 SyncGuard</strong></li></ul>
+            <ul>
+                <li><a href="/static/home.html">首页</a></li>
+                <li><a href="/static/connections.html">数据源</a></li>
+                <li><a href="#" aria-current="page">同步任务</a></li>
+                <li><a href="/static/records.html">同步结果</a></li>
+                <li><a href="#" id="logout-btn" class="secondary">退出</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main class="container">
+        <hgroup>
+            <h1>📋 同步任务</h1>
+            <p>创建并管理数据同步任务</p>
+        </hgroup>
+
+        <details open>
+            <summary><strong>➕ 创建新任务</strong></summary>
+            <p id="form-error"></p>
+            <p id="form-ok"></p>
+            <form style="margin-top:1rem;">
+                <label>任务名称
+                    <input type="text" name="task_name" placeholder="例如：用户数据同步" required>
+                </label>
+                <div class="grid">
+                    <label>源数据源
+                        <select name="connection_id" required>
+                            <option value="" selected disabled>— 请选择 —</option>
+                        </select>
+                    </label>
+                    <label>目标数据源
+                        <select name="target_connection_id" required>
+                            <option value="" selected disabled>— 请选择 —</option>
+                        </select>
+                    </label>
+                </div>
+                <label>同步内容
+                    <input type="text" name="sync_content" placeholder="例如：users, orders" required>
+                </label>
+                <button type="submit">创建任务</button>
+            </form>
+        </details>
+
+        <h2 style="margin-top:2rem;">任务列表</h2>
+        <table class="striped">
+            <thead>
+                <tr>
+                    <th>任务名称</th>
+                    <th>源 → 目标</th>
+                    <th>同步内容</th>
+                    <th>状态</th>
+                    <th>数量</th>
+                    <th>开始时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="job-tbody">
+                <tr><td colspan="7" style="text-align:center;color:var(--pico-muted-color);">加载中...</td></tr>
+            </tbody>
+        </table>
+    </main>
+
+    <script>
+    // ========== 认证检查 ==========
+    const token = localStorage.getItem('token');
+    if (!token) { window.location.href = '/static/login.html'; }
+
+    document.getElementById('logout-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        window.location.href = '/static/login.html';
+    });
+
+    // ========== DOM 引用 ==========
+    const form     = document.querySelector('form');
+    const errEl    = document.getElementById('form-error');
+    const okEl     = document.getElementById('form-ok');
+    const tbody    = document.getElementById('job-tbody');
+    const srcSel   = document.querySelector('select[name="connection_id"]');
+    const tgtSel   = document.querySelector('select[name="target_connection_id"]');
+
+    let connMap = {}; // id → name
+
+    // ========== 加载数据源列表（填充下拉框） ==========
+    async function loadConnections() {
+        try {
+            const res = await fetch('/api/connections', {
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            const data = await res.json();
+            const list = data.data || [];
+
+            connMap = {};
+            const opts = list.map(c => {
+                connMap[c.id] = c.name;
+                return `<option value="${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.source_type)})</option>`;
+            }).join('');
+
+            srcSel.innerHTML = '<option value="" selected disabled>— 请选择 —</option>' + opts;
+            tgtSel.innerHTML = '<option value="" selected disabled>— 请选择 —</option>' + opts;
+        } catch (err) {
+            srcSel.innerHTML = '<option value="" disabled>加载失败</option>';
+            tgtSel.innerHTML = '<option value="" disabled>加载失败</option>';
+        }
+    }
+
+    // ========== 加载任务列表 ==========
+    async function loadJobs() {
+        try {
+            const res = await fetch('/api/jobs', {
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--pico-del-color);">${data.error || '加载失败'}</td></tr>`;
+                return;
+            }
+
+            const list = data.data || [];
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--pico-muted-color);">暂无任务，在上方创建第一个</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map(j => {
+                const srcName = connMap[j.connection_id] || `ID:${j.connection_id}`;
+                const tgtName = connMap[j.target_connection_id] || `ID:${j.target_connection_id}`;
+                return `
+                <tr>
+                    <td>${escapeHtml(j.task_name)}</td>
+                    <td><small>${escapeHtml(srcName)} → ${escapeHtml(tgtName)}</small></td>
+                    <td>${escapeHtml(j.sync_content)}</td>
+                    <td><span class="badge badge-${j.status}">${statusLabel(j.status)}</span></td>
+                    <td>${j.total_count || '-'}</td>
+                    <td><small>${formatTime(j.started_at)}</small></td>
+                    <td>
+                        ${(j.status === 'pending' || j.status === 'failed') ? `<button style="padding:0.25rem 0.5rem;font-size:0.8rem;" onclick="startJob(${j.id})">▶ 启动</button>` : ''}
+                        <button class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.8rem;" onclick="deleteJob(${j.id})">🗑 删除</button>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--pico-del-color);">网络错误</td></tr>';
+        }
+    }
+
+    // ========== 创建任务 ==========
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errEl.style.display = 'none';
+        okEl.style.display = 'none';
+
+        const body = {
+            connection_id:        parseInt(form.connection_id.value),
+            target_connection_id: parseInt(form.target_connection_id.value),
+            task_name:            form.task_name.value,
+            sync_content:         form.sync_content.value,
+        };
+
+        try {
+            const res = await fetch('/api/jobs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token,
+                },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                errEl.textContent = data.error || '创建失败';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            okEl.textContent = '创建成功！';
+            okEl.style.display = 'block';
+            form.reset();
+            loadJobs();
+        } catch (err) {
+            errEl.textContent = '网络错误，请确认后端已启动';
+            errEl.style.display = 'block';
+        }
+    });
+
+    // ========== 删除 ==========
+    async function deleteJob(id) {
+        if (!confirm('确定删除这个任务吗？')) return;
+
+        try {
+            const res = await fetch(`/api/jobs/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                alert(data.error || '删除失败');
+                return;
+            }
+            loadJobs();
+        } catch (err) {
+            alert('网络错误');
+        }
+    }
+
+    // ========== 启动同步 ==========
+    async function startJob(id) {
+        if (!confirm('确定启动这个同步任务吗？')) return;
+
+        try {
+            const res = await fetch(`/api/jobs/${id}/run`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                alert(data.error || '启动失败');
+                return;
+            }
+            loadJobs();
+        } catch (err) {
+            alert('网络错误');
+        }
+    }
+
+    // ========== 工具函数 ==========
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function formatTime(t) {
+        if (!t) return '-';
+        return new Date(t).toLocaleString('zh-CN');
+    }
+
+    function statusLabel(s) {
+        const map = { pending: '待执行', running: '运行中', completed: '已完成', failed: '失败' };
+        return map[s] || s;
+    }
+
+    // ========== 页面初始化 ==========
+    loadConnections().then(() => loadJobs());
+    // 每 3 秒刷新列表，有 running 状态的任务时可以实时看到进度变化
+    setInterval(loadJobs, 3000);
+    </script>
+</body>
+</html>
