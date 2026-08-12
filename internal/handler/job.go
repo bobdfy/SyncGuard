@@ -249,6 +249,7 @@ func (h *JobHandler) Reconcile(c *gin.Context) {
 	diffs, err := h.Reconciler.Reconcile(c.Request.Context(), job.ConnectionID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "对账出现错误"})
+		return
 	}
 
 	// ========== 5. 返回差异 ==========
