@@ -6,23 +6,29 @@ import (
 	"strconv"
 
 	"github.com/bobdfy/syncguard/internal/mq"
+	"github.com/bobdfy/syncguard/internal/reconciliation"
 	"github.com/bobdfy/syncguard/internal/repository"
 	"github.com/gin-gonic/gin"
 )
 
 // JobHandler 同步任务 CRUD + 启动同步的 HTTP handler
 type JobHandler struct {
-	JobStore *repository.JobStore
-	DB       *repository.DB // 供 ListRecords 创建 SyncedStore 用
-	MQ       *mq.Producer   // V2：发消息到 RabbitMQ，替代原来的 goroutine
+	JobStore   *repository.JobStore
+	DB         *repository.DB             // 供 ListRecords 创建 SyncedStore 用
+	MQ         *mq.Producer               // V2：发消息到 RabbitMQ，替代原来的 goroutine
+	Reconciler *reconciliation.Reconciler // V3：对账引擎
 }
 
 // NewJobHandler 创建 JobHandler。
 // V2 增加了 mqProducer 参数：RunJob 不再异步 goroutine，
 // 而是通过 MQ 发消息给 Worker 执行。
-func NewJobHandler(jobStore *repository.JobStore, db *repository.DB, mqProducer *mq.Producer) *JobHandler {
-	// TODO: 填空 — 创建 JobHandler 结构体并返回
-	return &JobHandler{jobStore, db, mqProducer}
+func NewJobHandler(jobStore *repository.JobStore, db *repository.DB, mqProducer *mq.Producer, reconciler *reconciliation.Reconciler) *JobHandler {
+	return &JobHandler{
+		JobStore:   jobStore,
+		DB:         db,
+		MQ:         mqProducer,
+		Reconciler: reconciler,
+	}
 }
 
 // ListJobs GET /api/jobs → 返回当前用户的所有同步任务
@@ -165,7 +171,7 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 	// TODO: 填空 — 调 h.MQ.Publish(c.Request.Context(), id, taskName)
 	// 如果 err != nil，返回 "发送消息失败"
 	// 成功则返回 "任务已发送到队列"
-	err = h.MQ.Publish(c.Request.Context(), id, taskName)
+	err = h.MQ.Publish(c.Request.Context(), id, taskName, job.ConnectionID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "发送消息失败"})
 		return
@@ -200,4 +206,56 @@ func (h *JobHandler) ListRecords(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
+}
+
+// Reconcile POST /api/jobs/:id/reconcile → 对账
+//
+// 流程：
+//  1. 从 URL 取 jobID
+//  2. 查 DB 拿到 job，验权，取出 ConnectionID
+//  3. 调 Reconciler.Reconcile(ctx, connectionID) 执行对账
+//  4. 返回差异列表 JSON
+func (h *JobHandler) Reconcile(c *gin.Context) {
+	// ========== 1. 取 userID（JWT 中间件注入） ==========
+	userID, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	userIDint := userID.(int)
+
+	// ========== 2. 从 URL 取 jobID ==========
+	// TODO: 填空1 — strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数格式错误"})
+		return
+	}
+
+	// ========== 3. 查 DB：任务存在 + 属于当前用户 ==========
+	job, err := h.JobStore.GetByID(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return
+	}
+	if job.UserID != userIDint {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权操作"})
+		return
+	}
+
+	// ========== 4. 执行对账 ==========
+	// TODO: 填空2 — 调 h.Reconciler.Reconcile(...)
+	// 提示：用 c.Request.Context() 作为 ctx，第二个参数是 job.ConnectionID
+	diffs, err := h.Reconciler.Reconcile(c.Request.Context(), job.ConnectionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "对账出现错误"})
+	}
+
+	// ========== 5. 返回差异 ==========
+	c.JSON(http.StatusOK, gin.H{
+		"job_id":           id,
+		"connection_id":    job.ConnectionID,
+		"difference_count": len(diffs),
+		"data":             diffs,
+	})
 }

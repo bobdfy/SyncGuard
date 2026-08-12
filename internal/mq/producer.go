@@ -98,7 +98,7 @@ func NewProducer(ch *amqp.Channel, exchange string, routingKey string) *Producer
 //	 Queue
 //	    ↓
 //	 Worker
-func (p *Producer) Publish(ctx context.Context, jobID int, taskName string) error {
+func (p *Producer) Publish(ctx context.Context, jobID int, taskName string, connectionid int) error {
 
 	// ========================================================
 	// 1. 组装要发送的任务消息
@@ -111,9 +111,10 @@ func (p *Producer) Publish(ctx context.Context, jobID int, taskName string) erro
 	// 所以先把 Worker 之后执行任务需要的信息
 	// 放进 JobMessage。
 	msg := JobMessage{
-		JobID:     jobID,
-		TaskName:  taskName,
-		Timestamp: time.Now(),
+		JobID:        jobID,
+		TaskName:     taskName,
+		Timestamp:    time.Now(),
+		ConnectionID: connectionid,
 	}
 
 	// ========================================================

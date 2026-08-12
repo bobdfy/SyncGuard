@@ -10,7 +10,7 @@ import (
 	"github.com/bobdfy/syncguard/internal/engine"
 	"github.com/bobdfy/syncguard/internal/mq"
 	"github.com/bobdfy/syncguard/internal/repository"
-	"github.com/bobdfy/syncguard/internal/source/mock"
+	"github.com/bobdfy/syncguard/internal/source"
 	"github.com/joho/godotenv"
 )
 
@@ -89,6 +89,8 @@ func main() {
 
 			// 7b. 查 DB 获取任务
 			jobStore := repository.NewJobStore(db)
+			// TODO: 填空1 — 创建 ConnectionStore（提示：看 factory.go NewSource 的第二个参数）
+			ConnectionStore := repository.NewConnectionStore(db)
 			job, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
 			if err != nil {
 				log.Printf("[Worker] 查询任务 %d 失败: %v", jobMsg.JobID, err)
@@ -104,7 +106,13 @@ func main() {
 			}
 
 			// 7d. 组装引擎：Mock 数据源 + JobDestination + 每页 200 条
-			src := mock.NewGenerator(1000)
+			// TODO: 填空2 — 调 source.NewSource 创建数据源
+			src, err := source.NewSource(context.Background(), db, ConnectionStore, jobMsg.ConnectionID)
+			if err != nil {
+				log.Printf("[Worker] 创建数据源失败: %v", err)
+				msg.Nack(false, false)
+				continue
+			}
 			syncedStore := repository.NewSyncedStore(db)
 			dst := repository.NewJobDestination(syncedStore, jobStore, jobMsg.JobID)
 			eng := engine.New(src, dst, 200)

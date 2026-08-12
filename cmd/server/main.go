@@ -9,6 +9,7 @@ import (
 	"github.com/bobdfy/syncguard/internal/handler"
 	"github.com/bobdfy/syncguard/internal/middleware"
 	"github.com/bobdfy/syncguard/internal/mq"
+	"github.com/bobdfy/syncguard/internal/reconciliation"
 	"github.com/bobdfy/syncguard/internal/repository"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -33,6 +34,9 @@ func main() {
 	connStore := repository.NewConnectionStore(db)
 	jobStore := repository.NewJobStore(db)
 
+	// V3：创建对账引擎
+	reconciler := reconciliation.NewReconciler(db, connStore)
+
 	// ========== V2：连接 RabbitMQ，创建 Producer ==========
 	// 从 .env 读取 RabbitMQ 地址
 	rabbitURL := os.Getenv("RABBITMQ_URL")
@@ -54,7 +58,7 @@ func main() {
 	// 创建 Handler（V2：JobHandler 多了 Producer 参数）
 	authHandler := handler.NewAuthHandler(userStore)
 	connHandler := handler.NewConnectionHandler(connStore)
-	jobHandler := handler.NewJobHandler(jobStore, db, producer)
+	jobHandler := handler.NewJobHandler(jobStore, db, producer, reconciler) // V3：加了对账引擎
 
 	r := gin.Default()
 
@@ -81,6 +85,7 @@ func main() {
 		api.DELETE("/jobs/:id", jobHandler.DeleteJob)
 
 		api.POST("/jobs/:id/run", jobHandler.RunJob)
+		api.POST("/jobs/:id/reconcile", jobHandler.Reconcile) // V3：对账
 
 		api.GET("/records", jobHandler.ListRecords)
 	}

@@ -1,0 +1,68 @@
+package source
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/bobdfy/syncguard/internal/engine"
+	"github.com/bobdfy/syncguard/internal/repository"
+	"github.com/bobdfy/syncguard/internal/source/github"
+	"github.com/bobdfy/syncguard/internal/source/mock"
+)
+
+/*
+NewSource 根据 connectionID 查 DB，按 source_type 创建对应的 Source 实现。
+
+这就是"工厂模式"：调用方只拿到 engine.Source 接口，不关心具体是 mock 还是 github。
+以后加 GitLab、Jira 等新数据源，只需：
+ 1. 写一个新包（如 internal/source/gitlab/source.go），实现 Fetch 方法
+ 2. 在这里加一个 case
+    Engine 一行都不用改——这就是依赖倒置的价值。
+
+流程：
+ 1. 查 connections 表 → 拿到 source_type + source_url
+ 2. switch source_type 创建对应的 Source
+
+source_url 的格式取决于 source_type：
+  - mock:  不需要（用不到）
+  - github: "owner/repo"，如 "golang/go"、"torvalds/linux"
+*/
+func NewSource(ctx context.Context, db *repository.DB, connectionStore *repository.ConnectionStore, connectionID int) (engine.Source, error) {
+	// 1. 查 connections 表
+	conn, err := connectionStore.GetByID(ctx, connectionID)
+	if err != nil {
+		return nil, fmt.Errorf("查询连接配置失败: %w", err)
+	}
+
+	// 2. 根据 source_type 选择实现
+	switch conn.SourceType {
+	case "mock":
+		return mock.NewGenerator(1000), nil
+
+	case "github":
+		// source_url 格式是 "owner/repo"，如 "golang/go"
+		// 用 SplitN 切成两份：owner 和 repo
+		//
+		// strings.SplitN 签名：func SplitN(s, sep string, n int) []string
+		//   SplitN("golang/go", "/", 2) → ["golang", "go"]
+		//   n=2 表示最多切 2 份，防止 repo 名里有 "/" 时切成 3+ 份
+		//   如果字符串里没有 "/"，返回的切片长度 < 2
+
+		// TODO: 填空1 — 解析 source_url，用 "/" 切分成 owner 和 repo
+		// 提示：strings.SplitN(conn.SourceURL, "/", 2)
+		parts := strings.SplitN(conn.SourceURL, "/", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("GitHub source_url 格式错误，需要 owner/repo, 实际: %s", conn.SourceURL)
+		}
+		owner := parts[0]
+		repo := parts[1]
+
+		// TODO: 填空2 — 调 github.NewSource(owner, repo) 创建 Source
+		// 提示：看 github/source.go 里的 NewSource 函数签名
+		return github.NewSource(owner, repo), nil
+
+	default:
+		return nil, fmt.Errorf("不支持的数据源类型: %s", conn.SourceType)
+	}
+}
