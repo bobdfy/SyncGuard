@@ -16,11 +16,18 @@ type JobDestination struct {
 	store      *SyncedStore // 负责 Save（写同步数据到目标库）
 	jobStore   *JobStore    // 负责读写 sync_jobs 表
 	jobID      int          // 当前任务的 ID
-	totalCount int          // 内存里累加，避免每次查 DB
+	userID     int
+	totalCount int    // 内存里累加，避免每次查 DB
+	cursor     string // 断点游标：GetCheckpoint 时缓存，避免 CreateBatch 清零
 }
 
-func NewJobDestination(store *SyncedStore, jobStore *JobStore, jobID int) *JobDestination {
-	return &JobDestination{store: store, jobStore: jobStore, jobID: jobID}
+func NewJobDestination(store *SyncedStore, jobStore *JobStore, jobID int, userID int) *JobDestination {
+	return &JobDestination{
+		store:    store,
+		jobStore: jobStore,
+		jobID:    jobID,
+		userID:   userID,
+	}
 }
 
 // ========== 以下是 engine.Destination 接口的四个方法 ==========
@@ -33,10 +40,10 @@ func NewJobDestination(store *SyncedStore, jobStore *JobStore, jobID int) *JobDe
 // 3. 调 UpdateStatus 把最新的 totalCount 写回 sync_jobs，前端轮询就能看到进度
 func (d *JobDestination) Save(ctx context.Context, records []model.Record) error {
 	// 1. 写数据到目标库
-	if err := d.store.Save(ctx, records); err != nil {
+	if err := d.store.SaveWithUser(ctx, d.userID, records); err != nil {
 		return fmt.Errorf("JobDestination.Save: %w", err)
 	}
-	// 2. 累加本页条数（_____ 填本页有多少条）
+	// 2. 累加本页条数
 	d.totalCount += len(records)
 
 	// 3. 更新 sync_jobs：状态="running"，total_count=最新值
@@ -49,14 +56,16 @@ func (d *JobDestination) Save(ctx context.Context, records []model.Record) error
 // 引擎启动时调用一次，拿到上次停在哪，从那继续。
 // 首次运行 cursor=""，引擎会从头发送。
 //
-// 返回值类型：光标是字符串，所以返回 (_____, error)
+// 返回值类型：光标是字符串。
 func (d *JobDestination) GetCheckpoint(ctx context.Context, taskName string) (string, error) {
 	// 1. 查 sync_jobs 拿到整条记录
 	job, err := d.jobStore.GetByID(ctx, d.jobID)
 	if err != nil {
 		return "", fmt.Errorf("GetCheckpoint: %w", err)
 	}
-	// 2. 返回 cursor 字段（_____ 填 job 的哪个字段）
+	// 2. 缓存上次的进度和断点，供后续 CreateBatch 沿用，避免崩溃重启后从头再来
+	d.totalCount = job.TotalCount
+	d.cursor = job.Cursor
 	return job.Cursor, nil
 }
 
@@ -78,10 +87,11 @@ func (d *JobDestination) UpdateCheckpoint(ctx context.Context, taskName string, 
 // 把 sync_jobs 状态改为 "running"，通知前端任务已开始。
 // StartAt 由 UpdateStatus 或 DB 层处理。
 //
-// 返回值是批次 ID，这里直接用 jobID（返回值类型是 _____）
+// 返回值是批次 ID，这里直接用 jobID
 func (d *JobDestination) CreateBatch(ctx context.Context) (int64, error) {
-	// UpdateStatus(ctx, jobID, 状态, totalCount, cursor, errorMsg)
-	err := d.jobStore.UpdateStatus(ctx, d.jobID, "running", 0, "", "")
+	// 状态改为 running，但 total_count / cursor 沿用 GetCheckpoint 缓存的旧值，
+	// 不清零，保证崩溃重启后能从断点继续、进度不丢。
+	err := d.jobStore.UpdateStatus(ctx, d.jobID, "running", d.totalCount, d.cursor, "")
 	if err != nil {
 		return 0, fmt.Errorf("CreateBatch: %w", err)
 	}

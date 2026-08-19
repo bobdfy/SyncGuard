@@ -16,11 +16,7 @@ type Source interface {
 	//   - records: 本页记录切片
 	//   - nextCursor: 下一页游标，空字符串表示没有下一页
 	//   - hasMore: 是否还有更多数据
-	Fetch(
-		ctx context.Context,
-		cursor string,
-		limit int,
-	) (
+	Fetch(ctx context.Context, cursor string, limit int) (
 		records []model.Record,
 		nextCursor string,
 		hasMore bool,

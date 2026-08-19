@@ -49,20 +49,16 @@ func NewSource(ctx context.Context, db *repository.DB, connectionStore *reposito
 		//   n=2 表示最多切 2 份，防止 repo 名里有 "/" 时切成 3+ 份
 		//   如果字符串里没有 "/"，返回的切片长度 < 2
 
-		// TODO: 填空1 — 解析 source_url，用 "/" 切分成 owner 和 repo
-		// 提示：strings.SplitN(conn.SourceURL, "/", 2)
 		parts := strings.SplitN(conn.SourceURL, "/", 2)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("GitHub source_url 格式错误，需要 owner/repo, 实际: %s", conn.SourceURL)
+			return nil, fmt.Errorf("GitHub source_url 格式错误，需要 owner/repo: %w（实际: %s）", engine.ErrNonRetryable, conn.SourceURL)
 		}
 		owner := parts[0]
 		repo := parts[1]
 
-		// TODO: 填空2 — 调 github.NewSource(owner, repo) 创建 Source
-		// 提示：看 github/source.go 里的 NewSource 函数签名
 		return github.NewSource(owner, repo), nil
 
 	default:
-		return nil, fmt.Errorf("不支持的数据源类型: %s", conn.SourceType)
+		return nil, fmt.Errorf("不支持的数据源类型: %w: %s", engine.ErrNonRetryable, conn.SourceType)
 	}
 }

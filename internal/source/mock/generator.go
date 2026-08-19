@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/bobdfy/syncguard/internal/engine"
 	"github.com/bobdfy/syncguard/internal/model"
 )
 
@@ -14,14 +15,13 @@ import (
 // 预生成指定数量的记录存内存，实现 engine.Source 接口
 // 用于 V0 阶段验证同步引擎的核心逻辑
 type Generator struct {
-	// TODO: records 按 ID 排序的记录切片
 	records []model.Record
-	// 保存记录 ID 对应的切片下标，用于快速定位
-	recordsFast map[string]int
+
+	recordsFast map[string]int // 保存记录 ID 对应的切片下标，用于快速定位
 }
 
 // 编译期检查：Generator 实现了 engine.Source 接口
-// var _ engine.Source = (*Generator)(nil)
+var _ engine.Source = (*Generator)(nil)
 
 // NewGenerator 预生成 count 条记录
 //
@@ -52,7 +52,6 @@ func NewGenerator(count int) *Generator {
 		g.records[i] = rec
 		g.recordsFast[rec.ID] = i
 	}
-	// 3. 存入 Generator.records
 	return g
 }
 

@@ -56,32 +56,23 @@ Reconcile 执行对账，返回差异列表。
 	diffs — 差异列表，没有差异时为空切片
 	err   — 查询/网络错误
 */
-func (r *Reconciler) Reconcile(ctx context.Context, connectionID int) ([]model.Diff, error) {
-	// ============================================================
+func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int) ([]model.Diff, error) {
+
 	// 第 1 步：创建 Source，拿到源端数据访问能力
-	// ============================================================
 	// 复用 Worker 那条工厂链路：
 	//   connectionID → 查 connections 表 → switch source_type → 创建具体 Source
 	//
-	// TODO: 填空1 — 调 source.NewSource 创建数据源
-	// 提示：看 worker/main.go 第 110 行，一样的调用
 	src, err := source.NewSource(ctx, r.db, r.connectionStore, connectionID)
 	if err != nil {
 		return nil, fmt.Errorf("创建数据源失败: %w", err)
 	}
 
-	// ============================================================
 	// 第 2 步：分页读取源端全部数据 → 放进 map
-	// ============================================================
 	// cursor 从空字符串开始（Source 会把 "" 当成第 1 页），
 	// 循环直到 hasMore == false。
 	sourceMap := make(map[string]model.Record) // key = Record.ID
 	cursor := ""
 
-	// TODO: 填空2 — 分页循环读取源端
-	// 提示：用 for {} 无限循环，每次调 src.Fetch(ctx, cursor, 100)
-	// 把返回的 records 塞进 sourceMap，更新 cursor
-	// hasMore == false 时 break
 	for {
 		records, nextcursor, hasmore, err := src.Fetch(ctx, cursor, 100)
 		if err != nil {
@@ -96,9 +87,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int) ([]model.D
 		}
 	}
 
-	// ============================================================
 	// 第 3 步：分页读取目标端（synced_records）→ 放进 map
-	// ============================================================
 	// 因为 synced_records 是所有数据源混在一起的，这里简化处理：
 	// 只对比 ID 以 "issue_" 开头的记录（GitHub Issue）。
 	// 后续加了其他数据源再扩展。
@@ -107,7 +96,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int) ([]model.D
 	offset := 0
 
 	for {
-		records, err := syncedStore.ListRecords(ctx, 100, offset)
+		records, err := syncedStore.ListRecordsByUser(ctx, userID, 100, offset)
 		if err != nil {
 			return nil, fmt.Errorf("查询目标端失败: %w", err)
 		}
@@ -120,9 +109,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int) ([]model.D
 		offset += len(records)
 	}
 
-	// ============================================================
 	// 第 4 步：对比两个 map，分类差异
-	// ============================================================
 	var diffs []model.Diff
 
 	// 4a. 源端有 → 检查目标端
@@ -141,8 +128,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int) ([]model.D
 		}
 
 		// 版本比较
-		// TODO: 填空3 — 版本号不一样时
-		// 提示：srcRec.Version != tgtRec.Version
 		if srcRec.Version != tgtRec.Version {
 			diffs = append(diffs, model.Diff{
 				SourceID:      id,
@@ -170,8 +155,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int) ([]model.D
 		}
 	}
 
-	// 4b. 目标端有、源端没有 → extra_in_target
-	// 4b. 目标端有、源端没有 → extra_in_target
 	// 4a 已经把源端有的全比过了，这里只找目标端多出来的
 	for id, tgtRec := range targetMap {
 		if _, exists := sourceMap[id]; !exists {

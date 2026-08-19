@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bobdfy/syncguard/internal/engine"
 	"github.com/bobdfy/syncguard/internal/model"
 )
 
@@ -22,8 +23,6 @@ GitHub Issues API 是 页码-based（?page=1&per_page=100），但 engine.Source
 	nextCursor = 页码+1 转字符串
 	hasMore    = 本页结果数 == limit（GitHub 不返回总数，只能猜）
 
-隐患：两次 Fetch 之间如果有人新建 Issue，页码偏移会导致漏数据。
-但 synced_records 表有 ON CONFLICT DO UPDATE（幂等），不会产生错误数据。
 */
 
 type Source struct {
@@ -89,56 +88,23 @@ Fetch 从 GitHub 拉一页 Issue，转成 []model.Record 返回。
   - nextCursor: 下一页页码字符串，没有下一页时为空
   - hasMore:    是否还有更多数据
   - err:        错误（网络问题 / API 报错）
-
-调用示例：
-
-	// Engine 内部会这样用：
-	records, cursor, hasMore, err := src.Fetch(ctx, "", 100)
-	// → GET /repos/owner/repo/issues?per_page=100&page=1
-	// → 返回前 100 条，cursor="2"，hasMore=true
-
-	records, cursor, hasMore, err = src.Fetch(ctx, "2", 100)
-	// → GET /repos/owner/repo/issues?per_page=100&page=2
-	// → 返回第 101-200 条，cursor="3"，hasMore=true
 */
 func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.Record, string, bool, error) {
-	// ============================================================
-	// 第 1 步：cursor（页码字符串）→ page（整数）
-	// ============================================================
-	// cursor 从 Engine 的断点机制传过来，是字符串格式。
-	// GitHub API 的 page 参数要求整数，所以用 strconv.Atoi 转。
 	//
-	// strconv.Atoi 签名：func Atoi(s string) (int, error)
-	// 返回两个值：转换后的 int 和 error。
-	// cursor 是我们自己生成的数字字符串，不可能出错，用 _ 忽略 error。
+	// 第 1 步：cursor（页码字符串）→ page（整数）
 	page := 1
 	if cursor != "" {
-		// TODO: 填空1 — 把 cursor 字符串转成 int 赋给 page
-		// 用 strconv.Atoi，返回值用 page 和 _ 接收
 		page, _ = strconv.Atoi(cursor)
 	}
 
-	// ============================================================
 	// 第 2 步：拼接 GitHub Issues API 的 URL
-	// ============================================================
-	// API 文档：GET /repos/{owner}/{repo}/issues
-	//
-	// 参数含义：
-	//   state=all      — 同时返回 open 和 closed 的 Issue
-	//   sort=updated   — 按 updated_at 排序
-	//   direction=asc  — 升序（旧→新），保证增量同步时不漏数据
-	//   per_page=limit — 每页最多多少条（最大 100）
-	//   page=page      — 第几页（从 1 开始）
 	url := fmt.Sprintf(
 		"https://api.github.com/repos/%s/%s/issues?state=all&sort=updated&direction=asc&per_page=%d&page=%d",
 		s.owner, s.repo, limit, page,
 	)
 
-	// ============================================================
 	// 第 3 步：创建 HTTP GET 请求
-	// ============================================================
-	// 用 NewRequestWithContext(ctx, ...) 而不是 NewRequest(...)，
-	// 这样 ctx 超时或取消时，HTTP 请求也会被中断。
+	// 用 NewRequestWithContext(ctx, ...) 这样 ctx 超时或取消时，HTTP 请求也会被中断。
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("创建请求失败: %w", err)
@@ -153,9 +119,7 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
 
-	// ============================================================
 	// 第 4 步：发送请求
-	// ============================================================
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		// 网络超时、DNS 解析失败、连接被拒等情况
@@ -164,27 +128,29 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 	}
 	defer resp.Body.Close() // 函数返回时自动关闭响应体，防止连接泄漏
 
-	// ============================================================
+	//
 	// 第 5 步：检查 HTTP 状态码
-	// ============================================================
 	// GitHub API 的典型错误码：
 	//   200      — 正常
 	//   403/429  — 限流（Rate Limit），等一会能恢复，可重试
 	//   404      — 仓库不存在或改名，不可重试
-	//   301      — 仓库被重定向（很少见）
-	//
+	//   301      — 仓库被重定向
 	// 非 200 统一包装成 SourceError，Worker 那边根据 StatusCode 决定
 	// 是重试还是放弃。
 	if resp.StatusCode != 200 {
-		return nil, "", false, &SourceError{StatusCode: resp.StatusCode}
+		srcErr := &SourceError{StatusCode: resp.StatusCode}
+		// 404：仓库不存在或改名，重试无意义，包装成永久错误让 Worker 直接进 DLQ。
+		// 403/429：限流，等一会能恢复，保持普通错误走退避重投。
+		if resp.StatusCode == 404 {
+			return nil, "", false, fmt.Errorf("%w: %w", engine.ErrNonRetryable, srcErr)
+		}
+		return nil, "", false, srcErr
 	}
 
-	// ============================================================
 	// 第 6 步：把 HTTP 响应体解析成 Go 结构体切片
-	// ============================================================
+
 	// GitHub 返回的是一个 JSON 数组：
 	//   [ {issue1}, {issue2}, {issue3}, ... ]
-	//
 	// json.NewDecoder(resp.Body).Decode(&issues)
 	//   - 流式解析：边读边解，不把整个 Body 一次性加载到内存
 	//   - 自动匹配 JSON 字段名 → 结构体字段的 json tag
@@ -193,15 +159,14 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		return nil, "", false, fmt.Errorf("解析响应失败: %w", err)
 	}
 
-	// ============================================================
 	// 第 7 步：Issue → Record 转换
-	// ============================================================
+	//
 	records := make([]model.Record, 0, len(issues))
 	for _, issue := range issues {
 
-		// --------------------------------------------------
+		//
 		// 7a. 过滤 Pull Request
-		// --------------------------------------------------
+		//
 		// GitHub 的 Issue 和 PR 共享同一个编号。
 		// 比如 Issue #42 和 PR #42 不可能同时存在，它们共用编号空间。
 		// /issues 接口把 Issue 和 PR 一起返回。
@@ -212,15 +177,12 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		//
 		// 所以 issue.PullRequest != nil → 这是 PR，跳过。
 		//
-		// TODO: 填空2 — 判断是否为 Pull Request
-		// 提示：PullRequest 字段是 *struct{} 类型，非 nil 就是 PR
 		if issue.PullRequest != nil {
 			continue
 		}
 
-		// --------------------------------------------------
 		// 7b. 组装 Data（Issue 的业务信息，存到 JSONB）
-		// --------------------------------------------------
+
 		// gitHubIssue 是全量的（字段和 API 返回值一一对应），
 		// gitHubIssueData 是精简的（只保留对账需要的字段）。
 		//
@@ -240,9 +202,9 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 			continue // 极少发生（结构体全是简单类型），跳过不影响其他
 		}
 
-		// --------------------------------------------------
+		//
 		// 7c. 构造 Record
-		// --------------------------------------------------
+
 		// Record 是 engine.Source 接口要求返回的标准格式。
 		//
 		// 字段映射：
@@ -254,11 +216,6 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		//   GitHub 的 updated_at 精度是秒级，同一秒内两次更新的概率极低。
 		//   对账时如果版本一样内容不同 → CONTENT_MISMATCH（Hash 比较兜底）。
 		//
-		// TODO: 填空3 — ID，格式 "issue_数字"
-		// 用 fmt.Sprintf 拼接，类似 "issue_%d"
-		//
-		// TODO: 填空4 — Version，秒级时间戳
-		// issue.UpdatedAt 是 time.Time 类型，调 .Unix() 得到 int64，强转 int
 		records = append(records, model.Record{
 			ID:        fmt.Sprintf("issue_%d", issue.Number),
 			Version:   int(issue.UpdatedAt.Unix()),
@@ -267,32 +224,21 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		})
 	}
 
-	// ============================================================
+	//
 	// 第 8 步：判断是否还有下一页 + 生成 nextCursor
-	// ============================================================
+	//
 	// GitHub Issues API 不返回总数，只能靠"本页结果数 == limit"推测：
 	//
 	//   结果数 == limit → 可能还有下一页（最后一页恰好整除时会多一次空请求，无害）
 	//   结果数 <  limit → 绝对是最后一页
-	//
-	// nextCursor = 当前页码 + 1 → 转回字符串
-	// 这样 Engine 下次调 Fetch 时传入这个字符串 → 循环回到第 1 步
 	hasMore := len(issues) == limit
 	nextCursor := ""
 	if hasMore {
-		// TODO: 填空5 — 把 page+1 转成字符串
-		// strconv.Itoa 签名：func Itoa(i int) string
-		// 和填空1 的 Atoi 互为反操作
 		nextCursor = strconv.Itoa(page + 1)
 	}
 
 	return records, nextCursor, hasMore, nil
 }
-
-// ================================================================
-// 以下为 JSON 解析用的结构体 + 工具函数
-// 不需要填空，理解即可
-// ================================================================
 
 /*
 gitHubIssue 对应 GitHub Issues API 返回的单条 Issue JSON。

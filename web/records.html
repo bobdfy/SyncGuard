@@ -117,10 +117,10 @@
 
             tbody.innerHTML = list.map(r => `
                 <tr>
-                    <td><code>${escapeHtml(r.ID)}</code></td>
-                    <td>v${r.Version}</td>
-                    <td><small>${formatTime(r.UpdatedAt)}</small></td>
-                    <td><span class="data-preview" title="${escapeHtml(JSON.stringify(r.Data))}">${escapeHtml(JSON.stringify(r.Data))}</span></td>
+                    <td><code>${escapeHtml(r.id)}</code></td>
+                    <td>v${r.version}</td>
+                    <td><small>${formatTime(r.updated_at)}</small></td>
+                    <td><span class="data-preview" title="${escapeHtml(JSON.stringify(r.data))}">${escapeHtml(JSON.stringify(r.data))}</span></td>
                 </tr>
             `).join('');
 

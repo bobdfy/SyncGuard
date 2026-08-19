@@ -1,0 +1,40 @@
+name: syncguard
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: syncguard-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: syncguard
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"   # PostgreSQL 默认端口
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    container_name: syncguard-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP 程序连接
+      - "15672:15672"  # Web 管理界面
+    environment:
+      RABBITMQ_DEFAULT_USER: syncguard
+      RABBITMQ_DEFAULT_PASS: syncguard
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  redis:
+    image: redis
+    container_name: syncguard-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  redis_data:

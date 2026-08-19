@@ -58,7 +58,7 @@ func main() {
 	// 创建 Handler（V2：JobHandler 多了 Producer 参数）
 	authHandler := handler.NewAuthHandler(userStore)
 	connHandler := handler.NewConnectionHandler(connStore)
-	jobHandler := handler.NewJobHandler(jobStore, db, producer, reconciler) // V3：加了对账引擎
+	jobHandler := handler.NewJobHandler(jobStore, connStore, db, producer, reconciler) // V3：加了对账引擎
 
 	r := gin.Default()
 
@@ -94,17 +94,19 @@ func main() {
 	r.Static("/static", "./web")
 	r.StaticFile("/", "./web/login.html")
 
+	// 读取端口（提到 goroutine 外，供日志打印使用）
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "9090"
+	}
+
 	// 启动 HTTP 服务
 	go func() {
-		port := os.Getenv("PORT")
-		if port == "" {
-			port = "9090"
-		}
 		if err := r.Run(":" + port); err != nil {
 			log.Fatalf("服务启动失败: %v", err)
 		}
 	}()
-	log.Println("SyncGuard 已启动: http://localhost: + PORT ")
+	log.Printf("SyncGuard 已启动: http://localhost:%s", port)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)

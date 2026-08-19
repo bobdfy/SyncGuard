@@ -1,5 +1,5 @@
 .env
-syncguard.exe
+*.exe
 syncguard
 .idea/
 .vscode/

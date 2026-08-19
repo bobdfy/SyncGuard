@@ -12,7 +12,6 @@ import (
 )
 
 // 编译期检查：SyncedStore 实现了 engine.Destination 接口
-// var _ engine.Destination = (*SyncedStore)(nil)
 var _ engine.Destination = (*SyncedStore)(nil)
 
 // SyncedStore 基于 PostgreSQL 的数据存储
@@ -59,6 +58,33 @@ func (s *SyncedStore) Save(ctx context.Context, records []model.Record) error {
 	for range records {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("Save batch exec: %w", err)
+		}
+	}
+	return nil
+}
+
+// SaveWithUser 带用户归属的批量 upsert：写入时记录 user_id，供查询时按用户过滤。
+func (s *SyncedStore) SaveWithUser(ctx context.Context, userID int, records []model.Record) error {
+	if len(records) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, rec := range records {
+		batch.Queue(
+			`INSERT INTO synced_records (id, version, updated_at, data, user_id) 
+			VALUES ($1, $2, $3, $4, $5) 
+			ON CONFLICT (id) DO UPDATE SET
+			version = EXCLUDED.version,
+			updated_at = EXCLUDED.updated_at,
+			data = EXCLUDED.data
+			`, rec.ID, rec.Version, rec.UpdatedAt, rec.Data, userID,
+		)
+	}
+	br := s.db.Pool().SendBatch(ctx, batch)
+	defer br.Close()
+	for range records {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("SaveWithUser batch exec: %w", err)
 		}
 	}
 	return nil
@@ -146,6 +172,29 @@ func (s *SyncedStore) ListRecords(ctx context.Context, limit, offset int) ([]mod
 		var r model.Record
 		if err := rows.Scan(&r.ID, &r.Version, &r.UpdatedAt, &r.Data); err != nil {
 			return nil, fmt.Errorf("ListRecords scan: %w", err)
+		}
+		records = append(records, r)
+	}
+	return records, nil
+}
+
+// ListRecordsByUser 只查询某个用户同步的记录。
+func (s *SyncedStore) ListRecordsByUser(ctx context.Context, userID, limit, offset int) ([]model.Record, error) {
+	rows, err := s.db.Pool().Query(ctx,
+		`SELECT id, version, updated_at, data
+		 FROM synced_records WHERE user_id = $1 ORDER BY id LIMIT $2 OFFSET $3`,
+		userID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListRecordsByUser: %w", err)
+	}
+	defer rows.Close()
+
+	var records []model.Record
+	for rows.Next() {
+		var r model.Record
+		if err := rows.Scan(&r.ID, &r.Version, &r.UpdatedAt, &r.Data); err != nil {
+			return nil, fmt.Errorf("ListRecordsByUser scan: %w", err)
 		}
 		records = append(records, r)
 	}

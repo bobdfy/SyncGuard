@@ -27,7 +27,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// 2. 空值判断
 	if username == "" || password == "" {
-		// 改：返回 JSON 错误，HTTP 400
 		c.JSON(400, gin.H{
 			"error": "用户名或密码不能为空",
 		})
@@ -37,7 +36,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// 3. 从数据库查用户（按 username）
 	user, err := h.UserStore.GetByUsername(c.Request.Context(), username)
 	if err != nil {
-		// 改：返回 JSON 错误，HTTP 401（不透露用户名还是密码错了）
+		// 不透露是用户名还是密码错误
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "用户名或者密码错误",
 		})
@@ -50,7 +49,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		[]byte(password),
 	)
 	if err != nil {
-		// 改：返回 JSON 错误，HTTP 401
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "用户名或密码错误",
 		})
@@ -58,16 +56,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// 5. 签发 JWT token
-	token, err := middleware.GenerateToken(int(user.ID), user.UserName)
+	token, err := middleware.GenerateToken(user.ID, user.UserName)
 	if err != nil {
-		// 改：返回 JSON 错误，HTTP 500
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "签发token失败",
 		})
 		return
 	}
 
-	// 6. 改：返回 JSON，把 token 和 username 给前端
+	// 6. 返回 token 和 username 给前端
 	//    前端收到后存 localStorage，后续请求带在 Authorization header 里
 	c.JSON(http.StatusCreated, gin.H{
 		"token":    token,
@@ -83,7 +80,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	// 2. 空值判断
 	if username == "" || password == "" {
-		// 改：返回 JSON 错误，HTTP 400
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "用户名或密码不能为空",
 		})
@@ -93,7 +89,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// 3. 用 bcrypt 生成密码哈希（Cost=10 是默认强度）
 	hashBytes, err := bcrypt.GenerateFromPassword([]byte(password), 10)
 	if err != nil {
-		// 改：返回 JSON 错误，HTTP 500
 		c.JSON(500, gin.H{
 			"error": "密码无效",
 		})
@@ -103,7 +98,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// 4. 写入数据库
 	err = h.UserStore.Create(c.Request.Context(), username, string(hashBytes))
 	if err != nil {
-		// 改：返回 JSON 错误，HTTP 409（Conflict，用户名重复）
+		// 用户名重复（409 Conflict）
 		c.JSON(http.StatusConflict, gin.H{
 			"error": "用户名已存在",
 		})
@@ -113,20 +108,18 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// 5. 查回用户的 ID（自增生成的，注册时不知道）
 	user, err := h.UserStore.GetByUsername(c.Request.Context(), username)
 	if err != nil {
-		// 改：返回 JSON 错误，HTTP 500
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
 		return
 	}
 
 	// 6. 签发 JWT
-	token, err := middleware.GenerateToken(int(user.ID), user.UserName)
+	token, err := middleware.GenerateToken(user.ID, user.UserName)
 	if err != nil {
-		// 改：返回 JSON 错误，HTTP 500
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "签发JWT失效"})
 		return
 	}
 
-	// 7. 改：返回 JSON（注册即登录，不需要再跳登录页）
+	// 7. 注册即登录，返回 token
 	c.JSON(http.StatusOK, gin.H{
 		"token":    token,
 		"username": user.UserName,
@@ -136,6 +129,5 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // Logout GET /api/logout → 退出登录
 // JWT 是无状态的，服务端不需要删任何东西，前端自己删 localStorage 即可
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// 改：返回 JSON 确认（以前是 c.Redirect 跳登录页）
 	c.JSON(http.StatusOK, gin.H{"data": ""})
 }

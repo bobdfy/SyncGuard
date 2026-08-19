@@ -29,22 +29,15 @@ type DB struct {
 //
 // 返回 error 而不是 panic，让调用方决定怎么处理
 func NewDB(ctx context.Context, databaseURL string) (*DB, error) {
-	// TODO:
-	// 1. 用 pgxpool.New(ctx, databaseURL) 创建连接池
-	//    - 这一步会解析 URL，但不会真正连数据库
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool.New: %w", err)
 	}
-	// 2. 用 pool.Ping(ctx) 验证连接
-	//    - 网络不通、密码错误在这里暴露
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("pool.Ping: %w", err)
 	}
-	// 3. 如果 Ping 失败，pool.Close() 释放资源再返回 error
 	log.Println("postgres connected")
-	// 4. 成功后返回 &DB{pool: pool}
 	return &DB{pool: pool}, nil
 }
 
@@ -65,11 +58,7 @@ func (db *DB) Pool() *pgxpool.Pool {
 //
 // Close 之后不能再执行任何 SQL，否则 panic
 func (db *DB) Close() {
-	// TODO:
-	// 1. 如果 pool 不为 nil，调用 pool.Close()
-	// // 2. pool.Close() 会等所有正在执行的查询完成再关
 	if db.pool != nil {
 		db.pool.Close()
 	}
-
 }
