@@ -2,6 +2,7 @@ package circuitbreaker_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,7 +13,20 @@ import (
 // 每个测试连一次 Redis，用自定义短冷却配置
 func newTestBreaker(t *testing.T, connectionID int) *circuitbreaker.CircuitBreaker {
 	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-	t.Cleanup(func() { client.Close() })
+	// 连不上 Redis 就跳过（而不是报错失败）
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		t.Skipf("Redis 未启动，跳过测试: %v", err)
+	}
+	// 清理：删除本次测试的熔断状态 key，避免残留影响下次运行
+	t.Cleanup(func() {
+		client.Del(context.Background(),
+			fmt.Sprintf("breaker:connection:%d", connectionID),
+			fmt.Sprintf("breaker:connection:%d:probe", connectionID))
+		_ = client.Close()
+	})
 	cfg := circuitbreaker.Config{
 		MaxFailures: 5,
 		OpenTimeout: 100 * time.Millisecond,
@@ -25,7 +39,7 @@ func newTestBreaker(t *testing.T, connectionID int) *circuitbreaker.CircuitBreak
 func TestBreakerOpensAfterFailures(t *testing.T) {
 	cb := newTestBreaker(t, 1)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if err := cb.RecordFailure(context.Background(), ""); err != nil {
 			t.Fatalf("RecordFailure 出错: %v", err)
 		}
@@ -61,7 +75,8 @@ func TestBreakerProbeAfterCooldown(t *testing.T) {
 		t.Fatalf("此时应处于熔断中")
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// 等待超过冷却期（150ms > OpenTimeout 100ms），留余量避免慢机器上贴边界
+	time.Sleep(150 * time.Millisecond)
 
 	// 冷却到期后：应放行，且拿到非空探针令牌
 	allowed, probeToken, err := cb.Allow(context.Background())
@@ -81,14 +96,14 @@ func TestBreakerClosesAfterProbeSuccess(t *testing.T) {
 	cb := newTestBreaker(t, 3) // connectionID 用 3
 
 	// ① 制造熔断
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if err := cb.RecordFailure(context.Background(), ""); err != nil {
 			t.Fatalf("RecordFailure 出错: %v", err)
 		}
 	}
 
-	// ② 等冷却，抢探针
-	time.Sleep(100 * time.Millisecond)
+	// ② 等冷却，抢探针（留余量）
+	time.Sleep(150 * time.Millisecond)
 
 	_, probeToken, err := cb.Allow(context.Background())
 	if err != nil {

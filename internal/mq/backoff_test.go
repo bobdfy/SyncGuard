@@ -14,8 +14,12 @@ func TestBackoffDelayMinimum(t *testing.T) {
 }
 
 func TestBackoffDelayMax(t *testing.T) {
-	if d := mq.BackoffDelay(100); d > 3*time.Minute {
-		t.Errorf("最大延迟不应超过上限3分钟, 实际为 %v", d)
+	d := mq.BackoffDelay(100)
+	if d < 2*time.Minute {
+		t.Errorf("大 attempt 应封顶在 2 分钟以上，实际 %v", d)
+	}
+	if d >= 3*time.Minute {
+		t.Errorf("大 attempt 应 < 3min(2min + 抖动)，实际 %v", d)
 	}
 }
 

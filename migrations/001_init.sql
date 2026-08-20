@@ -1,40 +1,85 @@
--- V0 初始化建表
--- 三张表支撑断点续传：中断重启后不丢数据
+-- ============================================================
+-- SyncGuard 数据库完整初始化（合并版）
+--
+-- 把旧版 5 个增量迁移收敛成一次建齐，整理为 4 张活表。
+-- 修正点：
+--   1. synced_records 主键改为复合键 (connection_id, id)，隔离多租户
+--   2. 所有归属列（user_id / connection_id）加 NOT NULL + 外键
+--   3. 删除 V0 遗留死表 sync_batches / sync_checkpoints（代码零引用）
+--
+-- ⚠️ 注意：脚本顶部 DROP 会清空同名表，仅用于学习项目（无存量数据）。
+--    生产环境需改用增量迁移 + 数据回填。
+-- ============================================================
+
+-- 清理旧表（含 V0 死表），保证脚本可重复执行、从头重建
+DROP TABLE IF EXISTS
+    synced_records,
+    sync_jobs,
+    connections,
+    users,
+    sync_batches,
+    sync_checkpoints CASCADE;
 
 -- ============================================================
--- 1. synced_records — 同步记录落地存储
+-- 1. users — 用户
 -- ============================================================
--- 用源端 ID 做主键，重复同步时 ON CONFLICT 更新
--- data 用 JSONB：支持后续对 JSON 字段建索引，JSON 不行
-CREATE TABLE IF NOT EXISTS synced_records (
-    id              TEXT        PRIMARY KEY,           -- 源端记录 ID（全局唯一）
-    version         INTEGER     NOT NULL,              -- 当前版本号，每次更新 +1
-    updated_at      TIMESTAMPTZ NOT NULL,              -- 源端最后修改时间
-    data            JSONB       NOT NULL DEFAULT '{}', -- 原始 JSON 载荷
-    synced_at       TIMESTAMPTZ NOT NULL DEFAULT NOW() -- 本系统入库时间
+CREATE TABLE users (
+    id            SERIAL PRIMARY KEY,
+    username      VARCHAR NOT NULL UNIQUE,
+    password_hash VARCHAR NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================
--- 2. sync_batches — 同步批次日志
+-- 2. connections — 数据源连接（每个连接归属一个用户）
 -- ============================================================
--- 每次引擎启动执行一次同步算一个 batch
--- status: 'running' → 开始同步时写入，结束时更新为 'completed' 或 'failed'
-CREATE TABLE IF NOT EXISTS sync_batches (
-    id          BIGSERIAL    PRIMARY KEY,              -- 自增批次 ID
-    status      TEXT         NOT NULL DEFAULT 'running', -- running / completed / failed
-    started_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),   -- 批次开始时间
-    finished_at TIMESTAMPTZ,                           -- 批次结束时间（完成或失败时写入）
-    total_count INTEGER      NOT NULL DEFAULT 0        -- 本批次共同步了多少条
+CREATE TABLE connections (
+    id          SERIAL PRIMARY KEY,
+    user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        VARCHAR NOT NULL,
+    source_type VARCHAR NOT NULL,   -- mock / github ...
+    source_url  VARCHAR NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================
--- 3. sync_checkpoints — 断点游标
+-- 3. sync_jobs — 同步任务（断点 / 进度 / 状态都在这一张表）
 -- ============================================================
--- 每个同步任务一行，记录"上一次同步到哪了"
--- 重启后读 last_cursor，从这里继续，cursor = '' 表示从头开始
--- 引擎每同步完一页就 UPDATE 这里，保证崩了之后最多丢一页
-CREATE TABLE IF NOT EXISTS sync_checkpoints (
-    task_name    TEXT        PRIMARY KEY,              -- 任务名称（如 'mock_sync'）
-    last_cursor  TEXT        NOT NULL DEFAULT '',      -- 上次完成位置的游标
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()    -- 最后更新时间
+CREATE TABLE sync_jobs (
+    id                   SERIAL PRIMARY KEY,
+    user_id              INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    connection_id        INT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    target_connection_id INT REFERENCES connections(id) ON DELETE SET NULL,  -- 可空：默认写入内部存储
+    task_name            VARCHAR NOT NULL,
+    sync_content         TEXT NOT NULL DEFAULT '',
+    status               VARCHAR NOT NULL DEFAULT 'pending',
+    cursor               TEXT NOT NULL DEFAULT '',
+    total_count          INT NOT NULL DEFAULT 0,
+    error_msg            TEXT NOT NULL DEFAULT '',
+    started_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at          TIMESTAMPTZ
 );
+
+-- ============================================================
+-- 4. synced_records — 同步记录落地（每用户的目标端镜像）
+-- ============================================================
+-- 复合主键 (connection_id, id)：同一数据源的同一条记录，在不同
+-- connection（不同用户 / 同一用户多个源连接）下各自独立，互不覆盖。
+-- user_id 是冗余列（等价于 connections.user_id），仅为查询免 JOIN。
+CREATE TABLE synced_records (
+    connection_id INT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    id            TEXT NOT NULL,              -- 源端记录 ID（在 connection 内唯一）
+    user_id       INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    version       INTEGER NOT NULL,
+    updated_at    TIMESTAMPTZ NOT NULL,
+    data          JSONB NOT NULL DEFAULT '{}',
+    synced_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (connection_id, id)
+);
+
+-- ============================================================
+-- 索引：覆盖代码里的实际查询路径
+-- ============================================================
+CREATE INDEX idx_synced_records_user_id ON synced_records (user_id);    -- ListRecordsByUser
+CREATE INDEX idx_sync_jobs_user_id ON sync_jobs (user_id);              -- ListByUser
+CREATE INDEX idx_sync_jobs_connection_id ON sync_jobs (connection_id);  -- 按源查任务

@@ -1,1 +1,0 @@
-ALTER TABLE synced_records ADD COLUMN IF NOT EXISTS user_id INT;

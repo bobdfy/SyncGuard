@@ -250,7 +250,7 @@ func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
 	if err != nil {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
-	dst := repository.NewJobDestination(syncedStore, jobStore, jobMsg.JobID, job.UserID)
+	dst := repository.NewJobDestination(syncedStore, jobStore, jobMsg.JobID, job.UserID, job.ConnectionID)
 	eng := engine.New(src, dst, 200)
 
 	log.Printf("[Worker] 开始执行 job_id=%d task_name=%s", jobMsg.JobID, jobMsg.TaskName)

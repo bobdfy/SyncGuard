@@ -88,15 +88,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int
 	}
 
 	// 第 3 步：分页读取目标端（synced_records）→ 放进 map
-	// 因为 synced_records 是所有数据源混在一起的，这里简化处理：
-	// 只对比 ID 以 "issue_" 开头的记录（GitHub Issue）。
-	// 后续加了其他数据源再扩展。
+	// 按 user_id + connection_id 过滤，只对比当前数据源的数据，避免多源混账。
 	syncedStore := repository.NewSyncedStore(r.db)
 	targetMap := make(map[string]model.Record)
 	offset := 0
 
 	for {
-		records, err := syncedStore.ListRecordsByUser(ctx, userID, 100, offset)
+		records, err := syncedStore.ListRecordsByUserAndConnection(ctx, userID, connectionID, 100, offset)
 		if err != nil {
 			return nil, fmt.Errorf("查询目标端失败: %w", err)
 		}

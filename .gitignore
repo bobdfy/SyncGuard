@@ -5,3 +5,4 @@ syncguard
 .vscode/
 *.swp
 Thumbs.db
+.gocache/

@@ -23,6 +23,11 @@ func main() {
 		log.Fatal("DATABASE_URL 未设置")
 	}
 
+	// JWT 签名密钥：从环境变量注入，杜绝硬编码。空值直接拒绝启动。
+	if err := middleware.SetJWTSecret(os.Getenv("JWT_SECRET")); err != nil {
+		log.Fatalf("JWT_SECRET: %v", err)
+	}
+
 	db, err := repository.NewDB(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)

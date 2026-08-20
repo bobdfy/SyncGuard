@@ -79,7 +79,7 @@ func (e *Engine) Run(ctx context.Context, taskName string) error {
 		}
 
 		//(d)判断是否为最后一页
-		if hasMore == false {
+		if !hasMore {
 			break
 		}
 

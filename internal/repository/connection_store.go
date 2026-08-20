@@ -55,7 +55,12 @@ func (s *ConnectionStore) ListByUser(ctx context.Context, userID int) ([]model.C
 		conns = append(conns, c)
 	}
 
-	// 7. 全部行读完了，返回整个列表
+	// 7. 遍历完检查 rows.Err()，避免中途出错被静默吞掉
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ConnectionStore ListByUser rows: %w", err)
+	}
+
+	// 8. 全部行读完了，返回整个列表
 	return conns, nil
 }
 

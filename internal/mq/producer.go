@@ -29,12 +29,12 @@ func NewProducer(ch *amqp.Channel, exchange string, routingKey string) *Producer
 }
 
 // Publish 发布一条任务消息：组装 JobMessage → 序列化 JSON → 发到 Exchange。
-func (p *Producer) Publish(ctx context.Context, jobID int, taskName string, connectionid int, attempt int) error {
+func (p *Producer) Publish(ctx context.Context, jobID int, taskName string, connectionID int, attempt int) error {
 	msg := JobMessage{
 		JobID:        jobID,
 		TaskName:     taskName,
 		Timestamp:    time.Now(),
-		ConnectionID: connectionid,
+		ConnectionID: connectionID,
 		Attempt:      attempt,
 	}
 	body, err := json.Marshal(msg)

@@ -17,7 +17,7 @@ func NewJobStore(db *DB) *JobStore {
 }
 
 // Create 创建一条 sync_jobs 记录，返回自增 ID
-func (s *JobStore) Create(ctx context.Context, userID int, connectionID int, targetConnectionID int, taskName string, syncContent string) (int, error) {
+func (s *JobStore) Create(ctx context.Context, userID int, connectionID int, targetConnectionID *int, taskName string, syncContent string) (int, error) {
 	var jobID int
 	err := s.db.Pool().QueryRow(ctx,
 		`INSERT INTO sync_jobs(user_id, connection_id, target_connection_id, task_name, sync_content, status)
@@ -75,6 +75,9 @@ func (s *JobStore) ListByUser(ctx context.Context, userID int) ([]model.SyncJob,
 			return nil, fmt.Errorf("JobStore.ListByUser scan: %w", err)
 		}
 		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("JobStore ListByUser rows: %w", err)
 	}
 	return jobs, nil
 }

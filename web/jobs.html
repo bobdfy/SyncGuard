@@ -50,8 +50,8 @@
                         </select>
                     </label>
                     <label>目标数据源
-                        <select name="target_connection_id" required>
-                            <option value="" selected disabled>— 请选择 —</option>
+                        <select name="target_connection_id">
+                            <option value="" selected>— 默认内部存储 —</option>
                         </select>
                     </label>
                 </div>
@@ -119,7 +119,7 @@
             }).join('');
 
             srcSel.innerHTML = '<option value="" selected disabled>— 请选择 —</option>' + opts;
-            tgtSel.innerHTML = '<option value="" selected disabled>— 请选择 —</option>' + opts;
+            tgtSel.innerHTML = '<option value="" selected>— 默认内部存储 —</option>' + opts;
         } catch (err) {
             srcSel.innerHTML = '<option value="" disabled>加载失败</option>';
             tgtSel.innerHTML = '<option value="" disabled>加载失败</option>';
@@ -147,7 +147,7 @@
 
             tbody.innerHTML = list.map(j => {
                 const srcName = connMap[j.connection_id] || `ID:${j.connection_id}`;
-                const tgtName = connMap[j.target_connection_id] || `ID:${j.target_connection_id}`;
+                const tgtName = j.target_connection_id ? (connMap[j.target_connection_id] || `ID:${j.target_connection_id}`) : '内部存储';
                 return `
                 <tr>
                     <td>${escapeHtml(j.task_name)}</td>
@@ -176,7 +176,7 @@
 
         const body = {
             connection_id:        parseInt(form.connection_id.value),
-            target_connection_id: parseInt(form.target_connection_id.value),
+            target_connection_id: form.target_connection_id.value ? parseInt(form.target_connection_id.value) : null,
             task_name:            form.task_name.value,
             sync_content:         form.sync_content.value,
         };

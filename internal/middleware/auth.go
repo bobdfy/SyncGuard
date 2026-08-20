@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -8,9 +9,19 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// JWTSecret 签发和验证 JWT 时用的密钥
-// 生产环境应该从环境变量读取
-const JWTSecret = "syncguard-secret-key"
+// jwtSecret 签发和验证 JWT 时用的密钥。
+// 由 SetJWTSecret 在服务启动时从环境变量 JWT_SECRET 注入，不硬编码。
+var jwtSecret []byte
+
+// SetJWTSecret 设置 JWT 签名密钥，需在签发/验证 token 之前调用。
+// 传空串返回错误，防止用空密钥签发 token 造成安全漏洞。
+func SetJWTSecret(secret string) error {
+	if secret == "" {
+		return errors.New("JWT_SECRET 不能为空")
+	}
+	jwtSecret = []byte(secret)
+	return nil
+}
 
 // Claims 自定义 JWT payload，除了标准字段外带上 UserID 和 Username
 type Claims struct {
@@ -50,7 +61,7 @@ func AuthRequired() gin.HandlerFunc {
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims,
 			func(t *jwt.Token) (any, error) {
-				return []byte(JWTSecret), nil
+				return jwtSecret, nil
 			},
 		)
 
@@ -81,7 +92,7 @@ func GenerateToken(userID int, username string) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	tokenString, err := token.SignedString([]byte(JWTSecret))
+	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
 		return "", err
 	}

@@ -13,7 +13,7 @@ type SyncJob struct {
 	ID                 int        `json:"id"`
 	UserID             int        `json:"user_id"`
 	ConnectionID       int        `json:"connection_id"`
-	TargetConnectionID int        `json:"target_connection_id"` //目标端
+	TargetConnectionID *int       `json:"target_connection_id"` // 目标端，可空（nil=默认内部存储）
 	TaskName           string     `json:"task_name"`
 	SyncContent        string     `json:"sync_content"` //同步内容
 	Status             string     `json:"status"`

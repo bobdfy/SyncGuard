@@ -66,7 +66,7 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 	// 2. 绑定 JSON 请求体
 	var req struct {
 		ConnectionID       int    `json:"connection_id"`
-		TargetConnectionID int    `json:"target_connection_id"`
+		TargetConnectionID *int   `json:"target_connection_id"` // 可空：nil = 默认内部存储
 		TaskName           string `json:"task_name"`
 		SyncContent        string `json:"sync_content"`
 	}
@@ -83,6 +83,19 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 	if conn.UserID != userIDint {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权使用该数据源"})
 		return
+	}
+
+	// 校验目标数据源归属（如果填了）
+	if req.TargetConnectionID != nil {
+		targetConn, err := h.ConnStore.GetByID(c.Request.Context(), *req.TargetConnectionID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "目标数据源不存在"})
+			return
+		}
+		if targetConn.UserID != userIDint {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无权使用该目标数据源"})
+			return
+		}
 	}
 
 	// 3. 调 Store 写入
