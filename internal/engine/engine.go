@@ -59,7 +59,7 @@ func (e *Engine) Run(ctx context.Context, taskName string) error {
 		//(a)检查
 		select {
 		case <-ctx.Done():
-			_ = e.dst.CompleteBatch(context.Background(), batchID, "failed", totalCount)
+			// 取消时 ok 仍为 false，交给上面的 defer 统一记 failed，避免重复写两次。
 			return ctx.Err()
 		default:
 		}

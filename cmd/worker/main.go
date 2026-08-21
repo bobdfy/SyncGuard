@@ -81,10 +81,19 @@ func main() {
 		log.Fatalf("订阅队列失败: %v", err)
 	}
 
+	//组装outbox搬运工：扫描outbox未发送的信息--> 发送到RabbitMQ
+	outboxStore := repository.NewOutboxStore(db)
+	dispatcher := worker.NewDispatcher(producer, outboxStore)
+
 	// 组装消息处理器
-	h := worker.New(db, connLock, producer, rdb)
+	h := worker.New(db, connLock, rdb, outboxStore)
 
 	log.Println("Worker 已启动，等待消息...")
+
+	//启动搬运工：独立ctx， worker退出时一并取消
+	dispatcherCtx, cancelDispatcher := context.WithCancel(context.Background())
+	defer cancelDispatcher()
+	go dispatcher.Start(dispatcherCtx)
 
 	// 优雅退出：Ctrl+C 时退出循环
 	quit := make(chan os.Signal, 1)

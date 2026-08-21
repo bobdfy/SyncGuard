@@ -31,18 +31,18 @@ const (
 
 // Handler 消费 RabbitMQ 消息并执行同步任务。
 //
-// 把依赖（DB / 锁 / 生产者 / Redis）收进结构体，Handle 只需一个 msg 参数，
+// 把依赖（DB / 锁 / Redis / outbox）收进结构体，Handle 只需一个 msg 参数，
 // 比原来 handleJob 平铺传 4 个依赖更清晰，也方便单独写测试。
 type Handler struct {
 	db       *repository.DB
 	connLock *lock.ConnectionLock
-	producer *mq.Producer
 	rdb      *redisclient.Client
+	outbox   *repository.OutboxStore
 }
 
 // New 组装 Handler。
-func New(db *repository.DB, connLock *lock.ConnectionLock, producer *mq.Producer, rdb *redisclient.Client) *Handler {
-	return &Handler{db: db, connLock: connLock, producer: producer, rdb: rdb}
+func New(db *repository.DB, connLock *lock.ConnectionLock, rdb *redisclient.Client, outbox *repository.OutboxStore) *Handler {
+	return &Handler{db: db, connLock: connLock, rdb: rdb, outbox: outbox}
 }
 
 // Handle 处理单条 RabbitMQ 消息的完整生命周期。
@@ -98,15 +98,36 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 			msg.Ack(false)
 			return
 		}
-		// 新触发（found=false 或 owner != jobID）：记录 pending + 延迟重投。
-		// 注意顺序：两步都成功才 Ack，任一步失败都进 DLQ，否则消息会丢。
-		if err := jobStore.UpdateStatus(context.Background(), jobMsg.JobID, model.JobStatusPending, job.TotalCount, job.Cursor, "connection 被占用，已延迟重投"); err != nil {
+
+		// 新触发（found=false 或 owner != jobID）：记录 pending + 写 outbox 延迟重投。
+		// 事务保证「记 pending」和「记待发消息」同生共死，消息不会丢。
+		payload, err := mq.MarshalOutboxPayload(jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt, lease.Milliseconds())
+		if err != nil {
+			log.Printf("[Worker] 构造 outbox payload 失败: %v", err)
+			msg.Nack(false, false)
+			return
+		}
+		tx, err := h.db.Begin(context.Background())
+		if err != nil {
+			log.Printf("[Worker]开启事务失败: %v", err)
+			msg.Nack(false, false)
+			return
+		}
+		defer tx.Rollback(context.Background())
+
+		if err := jobStore.UpdateStatusInTx(context.Background(), tx, jobMsg.JobID, model.JobStatusPending, job.TotalCount, job.Cursor, "connection 被占用，已延迟重投"); err != nil {
 			log.Printf("[Worker] 记录 pending 失败: %v", err)
 			msg.Nack(false, false)
 			return
 		}
-		if err := h.producer.PublishDelayed(context.Background(), jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt, lease); err != nil {
-			log.Printf("[Worker] 延迟重投失败: %v", err)
+
+		if err := h.outbox.Insert(context.Background(), tx, payload); err != nil {
+			log.Printf("[Worker] 写 outbox 失败: %v", err)
+			msg.Nack(false, false)
+			return
+		}
+		if err := tx.Commit(context.Background()); err != nil {
+			log.Printf("[Worker] 提交事务失败: %v", err)
 			msg.Nack(false, false)
 			return
 		}
@@ -114,7 +135,6 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 		msg.Ack(false)
 		return
 	}
-
 	// 4. 抢到锁：taskCtx 和 hbCtx 分离
 	//
 	// taskCtx 传给 eng.Run，Renew 失败时 cancelTask 停任务；
@@ -165,23 +185,42 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 		return
 	}
 	if runErr != nil {
-		// 熔断
+		// 熔断：数据源冷却中，按冷却时长写 outbox 延迟重投。
+		// 事务保证「记 pending」和「记待发消息」同生共死。
 		if errors.Is(runErr, circuitbreaker.ErrCircuitOpen) {
-			//熔断中
 			latest, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
 			if err != nil {
 				log.Printf("[Worker] 查询任务 %d 失败: %v", jobMsg.JobID, err)
 				msg.Nack(false, false)
 				return
 			}
-			delay := circuitbreaker.DefaultConfig().OpenTimeout //60s
-			if err := jobStore.UpdateStatus(context.Background(), jobMsg.JobID, model.JobStatusPending, latest.TotalCount, latest.Cursor, "熔断中，冷却后重试"); err != nil {
+			delay := circuitbreaker.DefaultConfig().OpenTimeout //60s，与熔断冷却对齐
+			payload, err := mq.MarshalOutboxPayload(jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt+1, delay.Milliseconds())
+			if err != nil {
+				log.Printf("[Worker] 构造 outbox payload 失败: %v", err)
+				msg.Nack(false, false)
+				return
+			}
+			tx, err := h.db.Begin(context.Background())
+			if err != nil {
+				log.Printf("[Worker] 开启事务失败: %v", err)
+				msg.Nack(false, false)
+				return
+			}
+			defer tx.Rollback(context.Background())
+
+			if err := jobStore.UpdateStatusInTx(context.Background(), tx, jobMsg.JobID, model.JobStatusPending, latest.TotalCount, latest.Cursor, "熔断中，冷却后重试"); err != nil {
 				log.Printf("[Worker] 记录 pending 失败: %v", err)
 				msg.Nack(false, false)
 				return
 			}
-			if err := h.producer.PublishDelayed(context.Background(), jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt+1, delay); err != nil {
-				log.Printf("[Worker] 熔断重投失败: %v", err)
+			if err := h.outbox.Insert(context.Background(), tx, payload); err != nil {
+				log.Printf("[Worker] 写 outbox 失败: %v", err)
+				msg.Nack(false, false)
+				return
+			}
+			if err := tx.Commit(context.Background()); err != nil {
+				log.Printf("[Worker] 提交事务失败: %v", err)
 				msg.Nack(false, false)
 				return
 			}
@@ -206,7 +245,8 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 		}
 
 		//   可重试错误（熔断/网络/DB 抖动）→ 指数退避重投
-		// 退避重投：按 attempt 算延迟，attempt+1 记录到消息体
+		// 退避重投：按 attempt 算延迟，attempt+1 记录到消息体。
+		// 事务保证「记 pending」和「记待发消息」同生共死。
 		delay := mq.BackoffDelay(jobMsg.Attempt)
 		latest, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
 		if err != nil {
@@ -214,13 +254,32 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 			msg.Nack(false, false)
 			return
 		}
-		if err := jobStore.UpdateStatus(context.Background(), jobMsg.JobID, model.JobStatusPending, latest.TotalCount, latest.Cursor, "执行失败，退避重试"); err != nil {
+		payload, err := mq.MarshalOutboxPayload(jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt+1, delay.Milliseconds())
+		if err != nil {
+			log.Printf("[Worker] 构造 outbox payload 失败: %v", err)
+			msg.Nack(false, false)
+			return
+		}
+		tx, err := h.db.Begin(context.Background())
+		if err != nil {
+			log.Printf("[Worker] 开启事务失败: %v", err)
+			msg.Nack(false, false)
+			return
+		}
+		defer tx.Rollback(context.Background())
+
+		if err := jobStore.UpdateStatusInTx(context.Background(), tx, jobMsg.JobID, model.JobStatusPending, latest.TotalCount, latest.Cursor, "执行失败，退避重试"); err != nil {
 			log.Printf("[Worker] 记录 pending 失败: %v", err)
 			msg.Nack(false, false)
 			return
 		}
-		if err := h.producer.PublishDelayed(context.Background(), jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt+1, delay); err != nil {
-			log.Printf("[Worker] 退避重投失败: %v", err)
+		if err := h.outbox.Insert(context.Background(), tx, payload); err != nil {
+			log.Printf("[Worker] 写 outbox 失败: %v", err)
+			msg.Nack(false, false)
+			return
+		}
+		if err := tx.Commit(context.Background()); err != nil {
+			log.Printf("[Worker] 提交事务失败: %v", err)
 			msg.Nack(false, false)
 			return
 		}
@@ -236,20 +295,25 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 // ctx 会向下传给数据源、数据库、分页循环，Renew 失败 cancel 后能真正停下。
 func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
 	connectionStore := repository.NewConnectionStore(h.db)
-	src, err := source.NewSource(ctx, h.db, connectionStore, jobMsg.ConnectionID)
+
+	syncedStore := repository.NewSyncedStore(h.db)
+
+	jobStore := repository.NewJobStore(h.db)
+	job, err := jobStore.GetByID(ctx, jobMsg.JobID)
+	if err != nil {
+		return fmt.Errorf("查询任务失败: %w", err)
+	}
+
+	src, err := source.NewSource(ctx, h.db, connectionStore, jobMsg.ConnectionID, job.SyncContent)
 	if err != nil {
 		return fmt.Errorf("创建数据源失败: %w", err)
 	}
 	// 熔断器：per-connectionID，状态存 Redis、跨 Worker 共享。
 	breaker := circuitbreaker.New(h.rdb.Client(), jobMsg.ConnectionID, circuitbreaker.DefaultConfig())
 	src = circuitbreaker.Wrap(src, breaker)
+	// 用完关闭数据源，释放其持有的资源（postgres 连接池）。
+	defer func() { _ = src.Close() }()
 
-	syncedStore := repository.NewSyncedStore(h.db)
-	jobStore := repository.NewJobStore(h.db)
-	job, err := jobStore.GetByID(ctx, jobMsg.JobID)
-	if err != nil {
-		return fmt.Errorf("查询任务失败: %w", err)
-	}
 	dst := repository.NewJobDestination(syncedStore, jobStore, jobMsg.JobID, job.UserID, job.ConnectionID)
 	eng := engine.New(src, dst, 200)
 

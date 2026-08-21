@@ -21,4 +21,8 @@ type Source interface {
 		nextCursor string,
 		hasMore bool,
 		err error)
+
+	// Close 释放数据源持有的资源（连接池等）。
+	// 无资源的实现（mock/github）返回 nil；调用方应在用完后 defer 关闭。
+	Close() error
 }

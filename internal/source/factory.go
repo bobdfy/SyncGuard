@@ -9,6 +9,7 @@ import (
 	"github.com/bobdfy/syncguard/internal/repository"
 	"github.com/bobdfy/syncguard/internal/source/github"
 	"github.com/bobdfy/syncguard/internal/source/mock"
+	"github.com/bobdfy/syncguard/internal/source/postgres"
 )
 
 /*
@@ -28,7 +29,7 @@ source_url 的格式取决于 source_type：
   - mock:  不需要（用不到）
   - github: "owner/repo"，如 "golang/go"、"torvalds/linux"
 */
-func NewSource(ctx context.Context, db *repository.DB, connectionStore *repository.ConnectionStore, connectionID int) (engine.Source, error) {
+func NewSource(ctx context.Context, db *repository.DB, connectionStore *repository.ConnectionStore, connectionID int, syncContent string) (engine.Source, error) {
 	// 1. 查 connections 表
 	conn, err := connectionStore.GetByID(ctx, connectionID)
 	if err != nil {
@@ -51,12 +52,15 @@ func NewSource(ctx context.Context, db *repository.DB, connectionStore *reposito
 
 		parts := strings.SplitN(conn.SourceURL, "/", 2)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("GitHub source_url 格式错误，需要 owner/repo: %w（实际: %s）", engine.ErrNonRetryable, conn.SourceURL)
+			return nil, fmt.Errorf("GitHub source_url 格式错误，需要 owner/repo: %w(实际: %s)", engine.ErrNonRetryable, conn.SourceURL)
 		}
 		owner := parts[0]
 		repo := parts[1]
 
 		return github.NewSource(owner, repo), nil
+
+	case "postgres":
+		return postgres.NewSource(ctx, conn.SourceURL, syncContent)
 
 	default:
 		return nil, fmt.Errorf("不支持的数据源类型: %w: %s", engine.ErrNonRetryable, conn.SourceType)

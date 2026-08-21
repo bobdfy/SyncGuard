@@ -64,6 +64,9 @@ func (s *failSource) Fetch(ctx context.Context, cursor string, limit int) ([]mod
 	return nil, "", false, fmt.Errorf("模拟数据源失败")
 }
 
+// Close 实现 engine.Source 接口：无资源可释放。
+func (s *failSource) Close() error { return nil }
+
 // 测试 1：完整同步 20 条，每页 10 条（共 2 页），全部落库、状态 completed。
 func TestRunSyncsAllRecords(t *testing.T) {
 	src := mock.NewGenerator(20)

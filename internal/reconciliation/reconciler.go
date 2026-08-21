@@ -56,16 +56,17 @@ Reconcile 执行对账，返回差异列表。
 	diffs — 差异列表，没有差异时为空切片
 	err   — 查询/网络错误
 */
-func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int) ([]model.Diff, error) {
+func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int, syncContent string) ([]model.Diff, error) {
 
 	// 第 1 步：创建 Source，拿到源端数据访问能力
 	// 复用 Worker 那条工厂链路：
 	//   connectionID → 查 connections 表 → switch source_type → 创建具体 Source
 	//
-	src, err := source.NewSource(ctx, r.db, r.connectionStore, connectionID)
+	src, err := source.NewSource(ctx, r.db, r.connectionStore, connectionID, syncContent)
 	if err != nil {
 		return nil, fmt.Errorf("创建数据源失败: %w", err)
 	}
+	defer func() { _ = src.Close() }()
 
 	// 第 2 步：分页读取源端全部数据 → 放进 map
 	// cursor 从空字符串开始（Source 会把 "" 当成第 1 页），

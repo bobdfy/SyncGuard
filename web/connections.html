@@ -47,11 +47,12 @@
                             <option value="" selected disabled>— 请选择 —</option>
                             <option value="mock">Mock（测试用）</option>
                             <option value="github">GitHub Issues</option>
+                            <option value="postgres">PostgreSQL</option>
                         </select>
                     </label>
                 </div>
                 <label>连接地址
-                    <input type="text" name="source_url" placeholder="GitHub 填 owner/repo（如 golang/go）；Mock 可随意填" required>
+                    <input type="text" name="source_url" placeholder="GitHub 填 owner/repo（如 golang/go）；PostgreSQL 填连接串（如 postgres://user:pass@host:5432/db）；Mock 可随意填" required>
                 </label>
                 <div class="grid">
                     <button type="submit" id="submit-btn">添加数据源</button>

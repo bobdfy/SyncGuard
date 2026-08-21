@@ -18,18 +18,20 @@ type JobHandler struct {
 	DB         *repository.DB             // 供 ListRecords 创建 SyncedStore 用
 	MQ         *mq.Producer               // V2：发消息到 RabbitMQ，替代原来的 goroutine
 	Reconciler *reconciliation.Reconciler // V3：对账引擎
+	Outbox     *repository.OutboxStore
 }
 
 // NewJobHandler 创建 JobHandler。
 // V2 增加了 mqProducer 参数：RunJob 不再异步 goroutine，
 // 而是通过 MQ 发消息给 Worker 执行。
-func NewJobHandler(jobStore *repository.JobStore, connStore *repository.ConnectionStore, db *repository.DB, mqProducer *mq.Producer, reconciler *reconciliation.Reconciler) *JobHandler {
+func NewJobHandler(jobStore *repository.JobStore, connStore *repository.ConnectionStore, db *repository.DB, mqProducer *mq.Producer, reconciler *reconciliation.Reconciler, outbox *repository.OutboxStore) *JobHandler {
 	return &JobHandler{
 		JobStore:   jobStore,
 		ConnStore:  connStore,
 		DB:         db,
 		MQ:         mqProducer,
 		Reconciler: reconciler,
+		Outbox:     outbox,
 	}
 }
 
@@ -201,15 +203,32 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 		return
 	}
 
-	// ========== 4. V2：发消息到 RabbitMQ（替代原来的 goroutine） ==========
+	// ========== 4. 写 outbox：搬运工负责发消息，消息不丢 ==========
 	// taskName 用 jobID 的字符串表示，传给 Worker 后填入 engine.Run()
 	taskName := strconv.Itoa(id)
 
-	err = h.MQ.Publish(c.Request.Context(), id, taskName, job.ConnectionID, 0)
+	// DelayMs=0 表示搬运工扫到后立即发主队列
+	payload, err := mq.MarshalOutboxPayload(id, taskName, job.ConnectionID, 0, 0)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "发送消息失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "构造消息失败"})
 		return
 	}
+	tx, err := h.DB.Begin(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "开启事务失败"})
+		return
+	}
+	defer tx.Rollback(c.Request.Context())
+
+	if err := h.Outbox.Insert(c.Request.Context(), tx, payload); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "记录消息失败"})
+		return
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "提交事务失败"})
+		return
+	}
+
 	// ========== 5. 打日志 ==========
 	log.Printf("任务 %d 已投递到 MQ", id)
 	c.JSON(http.StatusOK, gin.H{"data": "任务已发送"})
@@ -284,7 +303,7 @@ func (h *JobHandler) Reconcile(c *gin.Context) {
 	}
 
 	// ========== 4. 执行对账 ==========
-	diffs, err := h.Reconciler.Reconcile(c.Request.Context(), job.ConnectionID, userIDint)
+	diffs, err := h.Reconciler.Reconcile(c.Request.Context(), job.ConnectionID, userIDint, job.SyncContent)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "对账出现错误"})
 		return

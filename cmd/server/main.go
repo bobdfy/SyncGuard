@@ -38,6 +38,7 @@ func main() {
 	userStore := repository.NewUserStore(db)
 	connStore := repository.NewConnectionStore(db)
 	jobStore := repository.NewJobStore(db)
+	outboxStore := repository.NewOutboxStore(db)
 
 	// V3：创建对账引擎
 	reconciler := reconciliation.NewReconciler(db, connStore)
@@ -63,7 +64,8 @@ func main() {
 	// 创建 Handler（V2：JobHandler 多了 Producer 参数）
 	authHandler := handler.NewAuthHandler(userStore)
 	connHandler := handler.NewConnectionHandler(connStore)
-	jobHandler := handler.NewJobHandler(jobStore, connStore, db, producer, reconciler) // V3：加了对账引擎
+
+	jobHandler := handler.NewJobHandler(jobStore, connStore, db, producer, reconciler, outboxStore) // V3：加了对账引擎
 
 	r := gin.Default()
 

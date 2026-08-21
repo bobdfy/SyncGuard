@@ -63,3 +63,8 @@ func (b *breakerSource) Fetch(ctx context.Context, cursor string, limit int) ([]
 	_ = b.breaker.RecordSuccess(ctx, probeToken)
 	return records, nextCursor, hasMore, nil
 }
+
+// Close 透传到底层 Source，释放其资源（如 postgres 连接池）。
+func (b *breakerSource) Close() error {
+	return b.inner.Close()
+}

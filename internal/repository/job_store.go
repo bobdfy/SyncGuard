@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bobdfy/syncguard/internal/model"
+	"github.com/jackc/pgx/v5"
 )
 
 type JobStore struct {
@@ -53,6 +54,21 @@ func (s *JobStore) UpdateStatus(ctx context.Context, jobID int, status string, t
 	)
 	if err != nil {
 		return fmt.Errorf("JobStore.UpdateStatus: %w", err)
+	}
+	return nil
+}
+
+// // UpdateStatusInTx 事务版 UpdateStatus：在调用方给定的事务里更新任务状态。
+// 用于「更新状态 + 写 outbox」必须同生共死的场景。
+// SQL 与 UpdateStatus 完全一致，只是执行入口从连接池换成事务。
+func (s *JobStore) UpdateStatusInTx(ctx context.Context, tx pgx.Tx, jobID int, status string, totalCount int, cursor string, errMsg string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE sync_jobs SET status=$2, total_count=$3, cursor=$4, error_msg=$5,
+		 finished_at=CASE WHEN $6 IN ('completed','failed') THEN $7 ELSE finished_at END
+		 WHERE id=$1`, jobID, status, totalCount, cursor, errMsg, status, time.Now(),
+	)
+	if err != nil {
+		return fmt.Errorf("JobStore.UpdateStatusInTx: %w", err)
 	}
 	return nil
 }

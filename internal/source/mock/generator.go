@@ -113,3 +113,6 @@ func (g *Generator) Fetch(ctx context.Context, cursor string, limit int) ([]mode
 	// 9. 返回
 	return page, nextCursor, hasMore, nil
 }
+
+// Close 实现 engine.Source 接口：Generator 是纯内存实现，无资源可释放。
+func (g *Generator) Close() error { return nil }

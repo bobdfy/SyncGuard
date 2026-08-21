@@ -53,6 +53,9 @@ func NewSource(owner, repo string) *Source {
 	}
 }
 
+// Close 实现 engine.Source 接口：GitHub 源只用 http.Client（无需显式关闭），返回 nil。
+func (s *Source) Close() error { return nil }
+
 /*
 SourceError 包装 GitHub API 返回的 HTTP 错误状态码。
 

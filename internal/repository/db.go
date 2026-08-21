@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -48,6 +49,16 @@ func NewDB(ctx context.Context, databaseURL string) (*DB, error) {
 //   - 后续加日志、metrics 可以在这里拦截
 func (db *DB) Pool() *pgxpool.Pool {
 	return db.pool
+}
+
+// Begin 开启一个事务，供需要「多个操作同生共死」的场景使用（如 outbox）。
+// 调用方负责 Commit/Rollback。
+func (db *DB) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("DB Begin: %w", err)
+	}
+	return tx, nil
 }
 
 // Close 关闭连接池，释放所有连接
