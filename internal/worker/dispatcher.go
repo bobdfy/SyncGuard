@@ -11,14 +11,27 @@ import (
 	"github.com/bobdfy/syncguard/internal/repository"
 )
 
+// outboxPublisher 投递能力的最小接口（*mq.Producer 天然满足），
+// 便于单测注入 fake，不依赖真实 RabbitMQ。
+type outboxPublisher interface {
+	Publish(ctx context.Context, jobID int, taskName string, connectionID int, attempt int) error
+	PublishDelayed(ctx context.Context, jobID int, taskName string, connectionID int, attempt int, delay time.Duration) error
+}
+
+// outboxStore 读取/标记 outbox 消息的最小接口（*repository.OutboxStore 天然满足）。
+type outboxStore interface {
+	ListUnsent(ctx context.Context, limit int) ([]repository.OutboxMessage, error)
+	MarkSent(ctx context.Context, id int64) error
+}
+
 // Dispatcher 搬运工：定时扫描 outbox 未发送消息，发到 RabbitMQ。
 type Dispatcher struct {
-	producer *mq.Producer
-	store    *repository.OutboxStore
+	producer outboxPublisher
+	store    outboxStore
 }
 
 // NewDispatcher 组装搬运工。
-func NewDispatcher(producer *mq.Producer, store *repository.OutboxStore) *Dispatcher {
+func NewDispatcher(producer outboxPublisher, store outboxStore) *Dispatcher {
 	return &Dispatcher{producer: producer, store: store}
 }
 
@@ -40,14 +53,11 @@ func (d *Dispatcher) Start(ctx context.Context) {
 }
 
 // processOnce 扫一轮：查未发送 → 逐条发送 → 成功标 sent_at；失败留到下轮重试。
-//
-// 步骤：
-//  1. store.ListUnsent(ctx, 20) 拿最多 20 条未发送消息
 //  2. 循环每条：
-//     a. json.Unmarshal 解析出 mq.OutboxPayload
-//     b. DelayMs==0 → producer.Publish(...)；否则 producer.PublishDelayed(..., DelayMs 毫秒)
-//     c. 发成功 → store.MarkSent；失败 → 记日志、继续（不标记，下轮自动重试）
+
+// c. 发成功 → store.MarkSent；失败 → 记日志、继续（不标记，下轮自动重试）
 func (d *Dispatcher) processOnce(ctx context.Context) error {
+	// store.ListUnsent(ctx, 20) 拿最多 20 条未发送消息
 	msgs, err := d.store.ListUnsent(ctx, 20)
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -55,11 +65,12 @@ func (d *Dispatcher) processOnce(ctx context.Context) error {
 
 	for _, msg := range msgs {
 		var p mq.OutboxPayload
+		// a. json.Unmarshal 解析出 mq.OutboxPayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {
 			log.Printf("[Dispatcher] 解析 outbox 消息 %d 失败: %v", msg.ID, err)
 			continue //解析失败，等待人工处理
 		}
-
+		// b. DelayMs==0 → producer.Publish(...)；否则 producer.PublishDelayed(..., DelayMs 毫秒)
 		var sendErr error
 		if p.DelayMs == 0 {
 			//立即发出主队列

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SyncGuard 代码阅读顺序图</title>
+<style>
+  body { font-family: 'Roboto', 'PingFang SC', 'Segoe UI', Arial, sans-serif; margin: 24px auto; max-width: 1080px; padding: 0 16px; background: #F4F3EE; color: #1A1B1C; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .note { color: #6B7280; font-size: 13px; margin-top: 0; }
+  .accent { color: #4A86B8; font-weight: 600; }
+
+  .band { background: #FFFFFF; border: 1px solid #E4E3DD; border-radius: 14px; padding: 12px 14px; margin: 10px 0; display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .band .lbl { min-width: 118px; flex: 0 0 auto; }
+  .band .lbl .lv { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #8BC8EA; color: #1A1B1C; font-size: 13px; font-weight: 700; margin-right: 6px; }
+  .band .lbl .nm { font-size: 15px; font-weight: 600; }
+  .band .lbl .ln { font-size: 12px; color: #6B7280; margin-top: 2px; }
+  .band .lbl .wh { font-size: 12px; color: #6B7280; margin-top: 2px; line-height: 1.5; }
+  .chips { flex: 1 1 300px; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+  .chip { display: inline-flex; align-items: center; background: #EEF4FA; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 8px; padding: 3px 8px 3px 4px; font-size: 12px; line-height: 1.4; }
+  .chip .no { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; border-radius: 6px; background: #8BC8EA; color: #1A1B1C; font-size: 11px; font-weight: 700; margin-right: 6px; padding: 0 4px; }
+  .chip .f { font-weight: 600; }
+  .chip .l { color: #6B7280; margin-left: 6px; }
+
+  .arrow { text-align: center; color: #9CA3AF; font-size: 16px; line-height: 1; margin: 2px 0; }
+
+  h2 { font-size: 16px; margin: 22px 0 8px; }
+  .chain { background: #FFFFFF; border: 1px solid #E4E3DD; border-radius: 14px; padding: 12px 14px; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chain .cnode { display: inline-flex; align-items: center; background: #FDF3E7; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 8px; padding: 4px 8px; font-size: 12px; line-height: 1.4; }
+  .chain .cnode b { margin-right: 4px; color: #B35A2E; }
+  .chain .goseq { color: #9CA3AF; font-size: 14px; }
+  .chain .result { background: #E8F5EC; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 8px; padding: 4px 8px; font-size: 12px; color: #2E6B3F; }
+  .chain .dlq { background: #FBE9EA; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 8px; padding: 4px 8px; font-size: 12px; color: #9C2B30; }
+  .footer { color: #9CA3AF; font-size: 12px; margin-top: 16px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1>SyncGuard 代码阅读顺序图</h1>
+<p class="note">41 个非测试 Go 文件按"装配 → 模型 → 接口 → 实现 → 协调 → 闭环 → 对外"分为 10 层，自上而下按推荐顺序阅读。行数为 2026-09-24 工作区实测（含未提交的目标端重构）。</p>
+
+<div class="band">
+  <div class="lbl"><span class="lv">1</span><span class="nm">入口装配</span><div class="ln">2 文件 · 197 行</div><div class="wh">先看系统由哪两个进程组成、各依赖什么</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">01</span><span class="f">cmd/server/main.go</span><span class="l">95 行</span></div>
+    <div class="chip"><span class="no">02</span><span class="f">cmd/worker/main.go</span><span class="l">102 行</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">2</span><span class="nm">领域模型</span><div class="ln">5 文件 · 70 行</div><div class="wh">系统里流转的数据长什么样</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">03</span><span class="f">model/record.go</span><span class="l">20</span></div>
+    <div class="chip"><span class="no">04</span><span class="f">model/job.go</span><span class="l">21</span></div>
+    <div class="chip"><span class="no">05</span><span class="f">model/connection.go</span><span class="l">10</span></div>
+    <div class="chip"><span class="no">06</span><span class="f">model/user.go</span><span class="l">9</span></div>
+    <div class="chip"><span class="no">07</span><span class="f">model/diff.go</span><span class="l">10</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">3</span><span class="nm">引擎抽象</span><div class="ln">4 文件 · 121 行</div><div class="wh">同步骨架：分页 + 断点 + 幂等契约</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">08</span><span class="f">engine/errors.go</span><span class="l">7</span></div>
+    <div class="chip"><span class="no">09</span><span class="f">engine/source.go</span><span class="l">16</span></div>
+    <div class="chip"><span class="no">10</span><span class="f">engine/destination.go</span><span class="l">24</span></div>
+    <div class="chip"><span class="no">11</span><span class="f">engine/engine.go</span><span class="l">74</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">4</span><span class="nm">数据访问</span><div class="ln">8 文件 · 520 行</div><div class="wh">所有 SQL 落点 + 多租户防越权</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">12</span><span class="f">repository/db.go</span><span class="l">54</span></div>
+    <div class="chip"><span class="no">13</span><span class="f">repository/user_store.go</span><span class="l">29</span></div>
+    <div class="chip"><span class="no">14</span><span class="f">repository/connection_store.go</span><span class="l">83</span></div>
+    <div class="chip"><span class="no">15</span><span class="f">repository/job_store.go</span><span class="l">93</span></div>
+    <div class="chip"><span class="no">16</span><span class="f">repository/outbox_store.go</span><span class="l">52</span></div>
+    <div class="chip"><span class="no">17</span><span class="f">repository/synced_store.go</span><span class="l">96</span></div>
+    <div class="chip"><span class="no">18</span><span class="f">repository/job_destination.go</span><span class="l">78</span></div>
+    <div class="chip"><span class="no">19</span><span class="f">repository/internal_destination.go</span><span class="l">35</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">5</span><span class="nm">目标端</span><div class="ln">2 文件 · 108 行</div><div class="wh">可插拔目标：工厂 + 外部 PG</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">20</span><span class="f">destination/factory.go</span><span class="l">24</span></div>
+    <div class="chip"><span class="no">21</span><span class="f">destination/postgres/destination.go</span><span class="l">84</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">6</span><span class="nm">数据源</span><div class="ln">4 文件 · 525 行</div><div class="wh">工厂 + 三种实现的差异</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">22</span><span class="f">source/factory.go</span><span class="l">56</span></div>
+    <div class="chip"><span class="no">23</span><span class="f">source/mock/generator.go</span><span class="l">88</span></div>
+    <div class="chip"><span class="no">24</span><span class="f">source/github/source.go</span><span class="l">245</span></div>
+    <div class="chip"><span class="no">25</span><span class="f">source/postgres/source.go</span><span class="l">136</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">7</span><span class="nm">协调组件</span><div class="ln">9 文件 · 651 行</div><div class="wh">不丢 / 不重 / 不拖垮的可靠性三件套</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">26</span><span class="f">redisclient/client.go</span><span class="l">42</span></div>
+    <div class="chip"><span class="no">27</span><span class="f">mq/connection.go</span><span class="l">122</span></div>
+    <div class="chip"><span class="no">28</span><span class="f">mq/message.go</span><span class="l">28</span></div>
+    <div class="chip"><span class="no">29</span><span class="f">mq/producer.go</span><span class="l">84</span></div>
+    <div class="chip"><span class="no">30</span><span class="f">mq/consumer.go</span><span class="l">33</span></div>
+    <div class="chip"><span class="no">31</span><span class="f">mq/backoff.go</span><span class="l">25</span></div>
+    <div class="chip"><span class="no">32</span><span class="f">lock/connection_lock.go</span><span class="l">124</span></div>
+    <div class="chip"><span class="no">33</span><span class="f">circuitbreaker/circuit_breaker.go</span><span class="l">148</span></div>
+    <div class="chip"><span class="no">34</span><span class="f">circuitbreaker/source.go</span><span class="l">45</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">8</span><span class="nm">Worker 编排</span><div class="ln">2 文件 · 387 行</div><div class="wh">一条消息的完整生命周期</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">35</span><span class="f">worker/dispatcher.go</span><span class="l">71</span></div>
+    <div class="chip"><span class="no">36</span><span class="f">worker/worker.go</span><span class="l">316</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">9</span><span class="nm">对账引擎</span><div class="ln">1 文件 · 164 行</div><div class="wh">验证"同步真的对"</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">37</span><span class="f">reconciliation/reconciler.go</span><span class="l">164</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="band">
+  <div class="lbl"><span class="lv">10</span><span class="nm">HTTP 层</span><div class="ln">4 文件 · 569 行</div><div class="wh">对外暴露什么 API、怎么鉴权</div></div>
+  <div class="chips">
+    <div class="chip"><span class="no">38</span><span class="f">middleware/auth.go</span><span class="l">77</span></div>
+    <div class="chip"><span class="no">39</span><span class="f">handler/auth.go</span><span class="l">102</span></div>
+    <div class="chip"><span class="no">40</span><span class="f">handler/connection.go</span><span class="l">111</span></div>
+    <div class="chip"><span class="no">41</span><span class="f">handler/job.go</span><span class="l">279</span></div>
+  </div>
+</div>
+
+<h2>主线 A：一次同步任务的完整链路</h2>
+<div class="chain">
+  <div class="cnode"><b>41</b>RunJob 写 outbox（同事务）</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>35</b>Dispatcher 2s 轮询</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>29</b>Producer 发布</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>36</b>Worker 抢锁+心跳</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>22→24/25</b>源工厂 + 熔断包装</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>20→21/19</b>目标接线 + 进度包装</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>11</b>引擎分页循环</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>17</b>幂等落库</div>
+  <span class="goseq">→</span>
+  <div class="result">成功：Ack 完成</div>
+  <span class="goseq">/</span>
+  <div class="cnode"><b>31</b>退避/熔断 → outbox 延迟重投</div>
+  <span class="goseq">/</span>
+  <div class="dlq">超限进 DLQ</div>
+</div>
+
+<h2>主线 B：一次对账</h2>
+<div class="chain">
+  <div class="cnode"><b>41</b>Reconcile 触发</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>37</b>Reconciler</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>22</b>拉源端全量</div>
+  <span class="goseq">→</span>
+  <div class="cnode"><b>17</b>拉目标端全量（按用户+连接）</div>
+  <span class="goseq">→</span>
+  <div class="cnode">compareMaps 四类差异</div>
+</div>
+
+<p class="footer">数据口径：行数为 2026-09-24 本机实测（`Get-Content | Measure-Object -Line`，含未提交的目标端重构）；编号顺序即推荐阅读顺序，同层内按依赖先于被依赖排列。每个文件的一句话职责与关键点见 <code>docs/代码文件顺序复盘.md</code>。</p>
+</body>
+</html>

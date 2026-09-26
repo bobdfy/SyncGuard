@@ -13,10 +13,6 @@ type Consumer struct {
 }
 
 // NewConsumer 创建 Consumer，并设置 QoS(prefetch=1)。
-//
-// prefetch=1 表示「最多 1 条 unacked 消息」：当前消息 Ack/Nack 后，
-// RabbitMQ 才投递下一条。适合单个任务耗时长、每 Worker 同时只处理一个任务的场景；
-// 代价是吞吐低，以后支持并发执行时再调大。
 func NewConsumer(ch *amqp.Channel, queue string) (*Consumer, error) {
 	if err := ch.Qos(1, 0, false); err != nil {
 		return nil, fmt.Errorf("设置 Qos 失败: %w", err)

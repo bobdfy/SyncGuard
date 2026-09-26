@@ -1,0 +1,542 @@
+<!-- ===== 编号12 ===== -->
+<section class="file-block" id="file-12">
+  <h3 class="file-title">12 · internal/repository/db.go（54 行）— pgxpool 连接池封装</h3>
+  <p class="file-duty">职责：封装 *pgxpool.Pool，只负责连接的创建、验证、借用与关闭，本文件不写任何业务 SQL。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>type DB struct</b><br>
+      pool *pgxpool.Pool（未导出，外部只能经 Pool() 读取）
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Start: NewDB(ctx, databaseURL)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">pool := pgxpool.New(ctx, databaseURL)</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ err != nil ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-error">return nil, fmt.Errorf("pgxpool.New: %w", err)</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-step">pool.Ping(ctx) 探活</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ Ping err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <div class="fc-branch-label">是</div>
+            <div class="fc-error">pool.Close() 清理 → return nil, fmt.Errorf("pool.Ping: %w", err)</div>
+          </div>
+          <div class="fc-branch">
+            <div class="fc-branch-label">否</div>
+            <div class="fc-step">log.Println("postgres connected")</div>
+            <div class="fc-arrow">↓</div>
+            <div class="fc-end">return &amp;DB{pool: pool}, nil</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">其余方法：Pool() 直接 return db.pool；Begin(ctx) 调 db.pool.Begin(ctx)，err 包裹 "DB Begin: %w"；Close() 在 db.pool != nil 时 pool.Close()（幂等，Close 后再用 SQL 会 panic）。</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>NewDB（L32-43）：先 pgxpool.New 建池，再 Ping 验证；Ping 失败必须先 pool.Close() 再返回错误，避免连接池泄漏。</li>
+      <li>选择 pgxpool 而非 database/sql：纯 Go 驱动免 CGO，原生支持 COPY、LISTEN/NOTIFY、advisory lock。</li>
+      <li>Pool()（L50-52）：只读访问器，不暴露字段，便于日后拦截加日志/metrics。</li>
+      <li>Begin（L56-62）：开启事务交给调用方 Commit/Rollback，供 outbox「业务写库 + 写 outbox」同生共死使用。</li>
+      <li>Close（L71-75）：带 nil 判空，通常 defer 在 main 退出前调用。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：pgxpool.New / pool.Ping / pool.Close / pool.Begin ｜ 被调用：main 装配；NewUserStore/NewConnectionStore/NewJobStore/NewOutboxStore/NewSyncedStore 注入 *DB</p>
+</section>
+
+<!-- ===== 编号13 ===== -->
+<section class="file-block" id="file-13">
+  <h3 class="file-title">13 · internal/repository/user_store.go（29 行）— users 表读写</h3>
+  <p class="file-duty">职责：用户注册（Create）与按用户名查用户（GetByUsername），支撑登录校验。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type UserStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓ NewUserStore(db) 构造注入</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">Create(ctx, username, passwordHash)</div>
+        <div class="fc-start">Start</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">Exec: INSERT INTO users(username, password_hash) VALUES ($1, $2)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return fmt.Errorf("UserStore Create err: %w", err)</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return nil</div></div>
+        </div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">GetByUsername(ctx, username)</div>
+        <div class="fc-start">Start</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">QueryRow: SELECT id, username, password_hash, created_at FROM users WHERE username = $1</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">Scan(&amp;u.ID, &amp;u.UserName, &amp;u.PasswordHash, &amp;u.CreatedAt)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ err != nil ?（含 sql.ErrNoRows）</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return nil, fmt.Errorf("UserStore Get err: %w", err)</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return &amp;u, nil</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>Create（L18-24）：单条 Exec 插入，密码只存 passwordHash（哈希值，不存明文）。</li>
+      <li>GetByUsername（L26-35）：QueryRow + Scan 单行读取；未找到时 pgx 返回 ErrNoRows，被统一包裹为 "UserStore Get err" 上抛，由 service 层判空返回「用户不存在」。</li>
+      <li>无多租户过滤（users 表本身就是账号维度），username 应为唯一键，靠 DB 唯一约束兜底。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().Exec / QueryRow；model.User ｜ 被调用：auth/service 注册与登录 handler</p>
+</section>
+
+<!-- ===== 编号14 ===== -->
+<section class="file-block" id="file-14">
+  <h3 class="file-title">14 · internal/repository/connection_store.go（83 行）— connections 表 CRUD</h3>
+  <p class="file-duty">职责：管理用户的数据源连接配置，所有写操作带 user_id 双条件做租户隔离。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type ConnectionStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Create(ctx, userID, name, sourceType, sourceURL)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">Exec: INSERT INTO connections(user_id, name, source_type, source_url) VALUES($1,$2,$3,$4)</div>
+    <div class="fc-arrow">↓ err → return fmt.Errorf("ConnectionStore err: %w", err)</div>
+    <div class="fc-end">return nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">ListByUser(ctx, userID) 多行查询</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">Query: SELECT id,user_id,name,source_type,source_url,created_at FROM connections WHERE user_id = $1</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">defer rows.Close()（防连接泄露）；conns := []model.Connection{}</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ rows.Next() ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">循环内</div>
+        <div class="fc-step">rows.Scan(&amp;c.ID,&amp;c.UserID,&amp;c.Name,&amp;c.SourceType,&amp;c.SourceURL,&amp;c.CreatedAt)</div>
+        <div class="fc-arrow">↓ Scan err → return 错误</div>
+        <div class="fc-step">conns = append(conns, c)</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">遍历结束</div>
+        <div class="fc-step">rows.Err() 检查中途错误</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-end">return conns, nil</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">GetByID(ctx, id)</div></div>
+    <div class="fc-arrow">↓ QueryRow: SELECT ... FROM connections WHERE id = $1 → Scan 6 字段 → err 包裹 "ConnectionStore GetByID err"</div>
+    <div class="fc-end">return &amp;c, nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Update / Delete（多租户防护重点）</div></div>
+    <div class="fc-step">UPDATE connections SET name=$1, source_type=$2, source_url=$3 WHERE id=$4 AND user_id=$5</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">DELETE FROM connections WHERE id=$1 AND user_id=$2</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">★ WHERE id=? AND user_id=? 双条件：用户 A 无法改/删用户 B 的数据源；0 行受影响也不报错（调用方按需检查 RowsAffected）。</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>ListByUser（L28-65）：标准多行扫描范式——Query 拿游标 → defer rows.Close → for rows.Next() 逐行 Scan → rows.Err() 兜底，顺序与 SELECT 列严格一致。</li>
+      <li>GetByID（L67-74）：注意此处只按 id=$1 查，不带 user_id（factory 用它取任意目标连接配置），租户隔离由上层路由负责。</li>
+      <li>Update（L78-87）/ Delete（L91-100）：均以 WHERE id=? AND user_id=? 双重条件，是多租户防护的核心。</li>
+      <li>错误统一 fmt.Errorf("...: %w", err) 包装，保留原始 pgx 错误链。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().Exec/Query/QueryRow；model.Connection ｜ 被调用：连接管理 handler；destination.NewDestination（GetByID）</p>
+</section>
+
+<!-- ===== 编号15 ===== -->
+<section class="file-block" id="file-15">
+  <h3 class="file-title">15 · internal/repository/job_store.go（93 行）— sync_jobs 任务表</h3>
+  <p class="file-duty">职责：同步任务的创建、查询、状态流转与删除，状态字段驱动前端进度展示。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type JobStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Create(ctx, userID, connectionID, targetConnectionID, taskName, syncContent)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">QueryRow: INSERT INTO sync_jobs(user_id,connection_id,target_connection_id,task_name,sync_content,status) VALUES($1..$5,'pending') RETURNING id</div>
+    <div class="fc-arrow">↓ Scan(&amp;jobID)</div>
+    <div class="fc-decide">◇ err != nil ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return 0, fmt.Errorf("JobStore.Create: %w", err)</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return jobID, nil（初始 status='pending'）</div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">GetByID(ctx, jobID)</div></div>
+    <div class="fc-arrow">↓ QueryRow: SELECT 12 字段 FROM sync_jobs WHERE id = $1 → Scan 12 字段 → err 包裹 "JobStore.GetByID: %w"</div>
+    <div class="fc-end">return &amp;j, nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">UpdateStatus / UpdateStatusInTx（同一 SQL，两个入口）</div></div>
+    <div class="fc-step">UPDATE sync_jobs SET status=$2, total_count=$3, cursor=$4, error_msg=$5,<br>finished_at = CASE WHEN $6 IN ('completed','failed') THEN $7 ELSE finished_at END<br>WHERE id=$1</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">UpdateStatus（连接池）</div>
+        <div class="fc-step">s.db.Pool().Exec(ctx, sql, ..., time.Now())</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">UpdateStatusInTx（外部事务）</div>
+        <div class="fc-step">tx.Exec(ctx, 同 SQL) —— 与「写 outbox」同事务，同生共死</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">★ CASE 表达式：只有终态 completed/failed 才写 finished_at=now()，running 时保留原值。</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">ListByUser(ctx, userID)</div></div>
+    <div class="fc-arrow">↓ Query: SELECT 12 字段 FROM sync_jobs WHERE user_id = $1 ORDER BY started_at DESC → defer rows.Close → for Next() Scan append → rows.Err()</div>
+    <div class="fc-end">return jobs, nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Delete(ctx, id, userID)</div></div>
+    <div class="fc-arrow">↓ Exec: DELETE FROM sync_jobs WHERE id=$1 AND user_id=$2（双条件防越权删）</div>
+    <div class="fc-end">return nil</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>Create（L21-32）：INSERT 时硬编码 status='pending'，用 RETURNING id 取回自增主键给调用方。</li>
+      <li>UpdateStatus（L48-59）：单语句同时更新 status/total_count/cursor/error_msg，并用 CASE 只在终态落 finished_at，避免 running 覆盖结束时间。</li>
+      <li>UpdateStatusInTx（L64-74）：SQL 与 UpdateStatus 完全一致，唯一区别是用调用方传入的 pgx.Tx 执行——供「更新任务状态 + outbox 落消息」原子提交。</li>
+      <li>ListByUser（L77-99）：按 started_at DESC 倒序，最新任务在前；多行扫描范式同 connection_store。</li>
+      <li>Delete（L103-112）：WHERE id AND user_id 双条件租户隔离。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().QueryRow/Query/Exec；pgx.Tx；model.SyncJob ｜ 被调用：JobDestination（GetByID/UpdateStatus/UpdateStatusInTx）、任务 handler</p>
+</section>
+
+<!-- ===== 编号16 ===== -->
+<section class="file-block" id="file-16">
+  <h3 class="file-title">16 · internal/repository/outbox_store.go（52 行）— outbox 发件箱表</h3>
+  <p class="file-duty">职责：实现事务性发件箱模式——业务事务内先落消息，后台搬运工再扫描补发。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type OutboxStore struct</b> { db *DB }　|　<b>OutboxMessage</b> { ID int64; Payload []byte }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Insert(ctx, tx pgx.Tx, payload) —— 必须传外部事务</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ tx 由调用方 Begin 好了吗？（本函数不开启事务）</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是（业务事务进行中）</div>
+        <div class="fc-step">tx.Exec: INSERT INTO outbox(payload) VALUES($1)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return fmt.Errorf("OutboxStore Insert: %w", err) → 调用方 Rollback，业务一并回滚</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return nil（消息与业务数据同事务提交）</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">ListUnsent(ctx, limit)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">Query: SELECT id, payload FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT $1</div>
+    <div class="fc-arrow">↓ defer rows.Close()；msgs := make([]OutboxMessage, 0, limit)</div>
+    <div class="fc-step">for rows.Next(): Scan(&amp;m.ID,&amp;m.Payload) → append</div>
+    <div class="fc-arrow">↓ rows.Err() 检查</div>
+    <div class="fc-end">return msgs, nil（按 id 升序保证先发先处理）</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">MarkSent(ctx, id int64)</div></div>
+    <div class="fc-arrow">↓ Exec: UPDATE outbox SET sent_at = NOW() WHERE id = $1</div>
+    <div class="fc-arrow">↓ err → "OutboxStore MarkSent: %w"</div>
+    <div class="fc-end">return nil（幂等：重复标记只是覆盖 sent_at）</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>Insert（L27-34）：tx 由外部传入是发件箱模式的关键——业务写库与写 outbox 在同一事务内，要么一起提交要么一起回滚，杜绝「业务成功消息丢失」。</li>
+      <li>ListUnsent（L37-57）：sent_at IS NULL 筛未发，ORDER BY id 保证顺序消费，LIMIT 控制批量大小；用预分配切片 make(...,0,limit) 减少扩容。</li>
+      <li>MarkSent（L60-67）：sent_at=NOW() 软标记，失败的消息下次 ListUnsent 仍会被捞出重发，实现至少一次投递。</li>
+      <li>本文件不管理事务边界：Begin/Commit/Rollback 全部在调用方（worker）手里。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：外部 pgx.Tx.Exec；DB.Pool().Query/Exec ｜ 被调用：worker（Begin → JobStore.UpdateStatusInTx + OutboxStore.Insert → Commit）；发件箱 relay 循环调 ListUnsent/MarkSent</p>
+</section>
+
+<!-- ===== 编号17 ===== -->
+<section class="file-block" id="file-17">
+  <h3 class="file-title">17 · internal/repository/synced_store.go（96 行）— synced_records 内部落地表</h3>
+  <p class="file-duty">职责：把同步进来的记录批量 upsert 进内部库，并按 user/connection 维度分页查询对账。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type SyncedStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">SaveWithUser(ctx, userID, connectionID, records)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ len(records) == 0 ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-end">return nil（空批次短路，不开事务）</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-step">tx := s.db.Pool().Begin(ctx)</div>
+        <div class="fc-arrow">↓ Begin err → return "SaveWithUser Begin: %w"</div>
+        <div class="fc-step">defer tx.Rollback(ctx)（Commit 成功后为 no-op）</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">构造 pgx.Batch{}，逐条 Queue：<br>INSERT INTO synced_records(id, version, updated_at, data, user_id, connection_id)<br>VALUES ($1..$6)<br><b>ON CONFLICT (connection_id, id) DO UPDATE SET</b><br>version=EXCLUDED.version, updated_at=EXCLUDED.updated_at, data=EXCLUDED.data</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">br := tx.SendBatch(ctx, batch)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ for range records: br.Exec() err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">br.Close() → return "SaveWithUser batch exec: %w"（defer Rollback 回滚整批）</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-step">br.Close() 收集批次末尾错误</div></div>
+        </div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-end">return tx.Commit(ctx)（整批原子提交，不留半页数据）</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">ListRecordsByUser(ctx, userID, limit, offset)</div>
+        <div class="fc-step">Query: SELECT id,version,updated_at,data FROM synced_records WHERE user_id=$1 ORDER BY id LIMIT $2 OFFSET $3</div>
+        <div class="fc-arrow">↓ defer rows.Close → Scan append → rows.Err()</div>
+        <div class="fc-end">return records</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">ListRecordsByUserAndConnection(ctx, userID, connectionID, limit, offset)</div>
+        <div class="fc-step">Query: SELECT id,version,updated_at,data FROM synced_records WHERE user_id=$1 AND connection_id=$2 ORDER BY id LIMIT $3 OFFSET $4</div>
+        <div class="fc-arrow">↓ 同上行扫描范式</div>
+        <div class="fc-end">return records（对账引擎按单 connection 精确对比）</div>
+      </div>
+    </div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>SaveWithUser（L32-66）：★幂等核心——ON CONFLICT (connection_id, id) DO UPDATE，同一逻辑记录重复同步只更新 version/updated_at/data，不报错不插重。</li>
+      <li>事务边界：Begin → SendBatch 一次网络往返发整批 → 逐条 br.Exec() 回收结果 → br.Close() → tx.Commit；defer tx.Rollback 保证任何中途错误都回滚，整批原子。</li>
+      <li>多源隔离：唯一键是 (connection_id, id) 而非 id 单列，不同数据源即使记录 id 相同也互不覆盖。</li>
+      <li>空批次短路（L33-35）：len==0 直接返回，避免无意义事务开销。</li>
+      <li>两个 List 方法仅 WHERE 条件差一个 connection_id，均按 id 排序 + limit/offset 分页。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().Begin/Query；pgx.Batch/SendBatch；model.Record ｜ 被调用：internalSyncDest.Save（内部目标）、对账查询 handler</p>
+</section>
+
+<!-- ===== 编号18 ===== -->
+<section class="file-block" id="file-18">
+  <h3 class="file-title">18 · internal/repository/job_destination.go（78 行）— 装饰器：把引擎进度写进 sync_jobs</h3>
+  <p class="file-duty">职责：装饰 engine.Destination——数据落真正的 store，同时把 totalCount/cursor 进度累加并回写 sync_jobs。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>type JobDestination struct</b>（编译期 var _ engine.Destination = (*JobDestination)(nil)）<br>
+      store engine.Destination　// 真实落点：internalSyncDest 或外部 PG<br>
+      jobStore *JobStore<br>
+      jobID int<br>
+      totalCount int　// 内存累加，避免每页查 DB<br>
+      cursor string　// GetCheckpoint 时缓存，CreateBatch 不清零
+    </div>
+    <div class="fc-arrow">↓ NewJobDestination(store, jobStore, jobID)</div>
+    <div class="fc-arrow">↓</div>
+    <div class="iface-box"><b>engine.Destination 接口方法分层流程</b></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Save(ctx, records) —— 引擎每拉一页调一次</div></div>
+    <div class="fc-step">① d.store.Save(ctx, records) 委托真实落点写数据（幂等由 store 自己保证）</div>
+    <div class="fc-arrow">↓ err → return fmt.Errorf("JobDestination.Save: %w", err)</div>
+    <div class="fc-step">② d.totalCount += len(records)　内存累加本页条数</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">③ jobStore.UpdateStatus(ctx, jobID, "running", d.totalCount, "", "")　写进度给前端轮询</div>
+    <div class="fc-end">return</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">GetCheckpoint(ctx, taskName) —— 引擎启动调一次</div></div>
+    <div class="fc-step">① job, err := d.jobStore.GetByID(ctx, d.jobID)</div>
+    <div class="fc-arrow">↓ err → "GetCheckpoint: %w"</div>
+    <div class="fc-step">② d.totalCount = job.TotalCount　★缓存总数到内存</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">③ d.cursor = job.Cursor　★缓存断点游标</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-end">return job.Cursor, nil（首次运行 cursor="" 从头开始）</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">UpdateCheckpoint(ctx, taskName, cursor)</div></div>
+    <div class="fc-arrow">↓ 透传 jobStore.UpdateStatus(jobID, "running", d.totalCount, cursor, "") —— 状态仍 running，只更新 cursor</div>
+    <div class="fc-end">return</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">CreateBatch(ctx) —— 引擎启动时调</div></div>
+    <div class="fc-step">jobStore.UpdateStatus(jobID, "running", <b>d.totalCount</b>, <b>d.cursor</b>, "")</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">★关键细节：totalCount/cursor 沿用 GetCheckpoint 缓存的旧值，绝不清零——崩溃重启后进度不丢、从断点续跑。</div>
+    <div class="fc-arrow">↓ err → "CreateBatch: %w"</div>
+    <div class="fc-end">return int64(d.jobID), nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">CompleteBatch(ctx, batchID, status, totalCount)</div></div>
+    <div class="fc-arrow">↓ jobStore.UpdateStatus(jobID, status, totalCount, "", "") —— status 透传（completed/failed），不硬编码</div>
+    <div class="fc-end">return</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Close()</div></div>
+    <div class="fc-arrow">↓ return d.store.Close()（透传释放底层资源，如外部 PG 连接池）</div>
+    <div class="fc-end">return</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>装饰器模式：Save 委托 d.store.Save，自身只做「计数 + 回写进度」，不关心数据落哪。</li>
+      <li>GetCheckpoint（L61-71）：★把 job.TotalCount / job.Cursor 缓存到结构体字段，这是 CreateBatch 能「不清零」的前提。</li>
+      <li>CreateBatch（L92-101）：状态置 running 但 total_count/cursor 用缓存旧值，重启续跑的关键。</li>
+      <li>Save（L43-53）：先写数据成功才累加计数并更新进度；写失败直接返回，进度不前进。</li>
+      <li>CompleteBatch（L110-114）：status 由引擎传入（失败是 failed），配合 UpdateStatus 的 CASE 自动落 finished_at。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：engine.Destination.store；JobStore.GetByID/UpdateStatus；model.Record ｜ 被调用：worker 装配为 engine.Destination 传给同步引擎</p>
+</section>
+
+<!-- ===== 编号19 ===== -->
+<section class="file-block" id="file-19">
+  <h3 class="file-title">19 · internal/repository/internal_destination.go（35 行）— 内部存储适配器</h3>
+  <p class="file-duty">职责：把 SyncedStore 包装成完整 engine.Destination 接口——只真实现 Save，其余方法空操作。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>type internalSyncDest struct</b>（编译期 var _ engine.Destination = (*internalSyncDest)(nil)）<br>
+      store *SyncedStore；userID int；connectionID int
+    </div>
+    <div class="fc-arrow">↓ NewInternalDest(store, userID, connectionID) 返回 engine.Destination</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Save(ctx, records) —— 唯一有真实逻辑的方法</div></div>
+    <div class="fc-arrow">↓ return d.store.SaveWithUser(ctx, d.userID, d.connectionID, records)</div>
+    <div class="fc-arrow">↓（带上 user_id/connection_id 归属，走整批事务 + ON CONFLICT upsert）</div>
+    <div class="fc-end">return SaveWithUser 的错误</div>
+    <div class="fc-arrow">↓</div>
+    <div class="iface-box">以下 4 个方法空实现（断点/进度统一由外层 JobDestination 管理）：</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">GetCheckpoint</div><div class="fc-step">return "", nil</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">UpdateCheckpoint</div><div class="fc-step">return nil</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">CreateBatch</div><div class="fc-step">return 0, nil</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">CompleteBatch / Close</div><div class="fc-step">return nil（无资源可释放）</div></div>
+    </div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>存在原因（注释 L13-18）：SyncedStore 清理后只剩「写数据」能力，而 JobDestination.store 字段需要完整 engine.Destination 类型，故用适配器补齐接口。</li>
+      <li>Save（L26-28）：唯一真实方法，委托 SaveWithUser 并注入 userID/connectionID，供多租户隔离与对账。</li>
+      <li>GetCheckpoint/UpdateCheckpoint/CreateBatch/CompleteBatch/Close 全部空实现——内部路径的断点与进度由外层 JobDestination 统一管，避免双写。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：SyncedStore.SaveWithUser ｜ 被调用：worker 在 targetConnectionID==0（写内部库）时 NewInternalDest 装配进 JobDestination</p>
+</section>
+
+<!-- ===== 编号20 ===== -->
+<section class="file-block" id="file-20">
+  <h3 class="file-title">20 · internal/destination/factory.go（24 行）— 目标端工厂</h3>
+  <p class="file-duty">职责：按目标连接配置的 source_type 选择并构造对应的外部 engine.Destination。</p>
+  <div class="fc">
+    <div class="fc-row"><div class="fc-start">NewDestination(ctx, connStore, targetConnectionID, syncContent)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">conn, err := connStore.GetByID(ctx, targetConnectionID) 查目标连接配置</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ err != nil ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return nil, fmt.Errorf("查询目标连接配置失败: %w", err)</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-decide">◇ switch conn.SourceType</div>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <div class="fc-branch-label">case "postgres"</div>
+            <div class="fc-step">table := strings.SplitN(syncContent, ":", 2)[0]<br>（取 "table[:pk]" 冒号前的表名）</div>
+            <div class="fc-arrow">↓</div>
+            <div class="fc-step">return postgres.NewDestination(ctx, conn.SourceURL, table)</div>
+          </div>
+          <div class="fc-branch">
+            <div class="fc-branch-label">default</div>
+            <div class="fc-error">return nil, fmt.Errorf("不支持的目标类型: %w: %s", engine.ErrNonRetryable, conn.SourceType)<br>★包装不可重试错误</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">注意：targetConnectionID==0 表示「写内部存储」，由调用方自行分支，本函数只负责外部目标。</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>先查连接（L22-25）：复用 ConnectionStore.GetByID 拿 source_type 与 source_url。</li>
+      <li>表名解析（L30）：syncContent 格式为 "table[:pk]"，SplitN 最多切 2 段取第 0 段作为目标表名。</li>
+      <li>目前只支持 postgres；未知类型返回带 engine.ErrNonRetryable 包装的错误，让引擎知道不要重试。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：ConnectionStore.GetByID；postgres.NewDestination；strings.SplitN；engine.ErrNonRetryable ｜ 被调用：worker 创建外部目标端时调用</p>
+</section>
+
+<!-- ===== 编号21 ===== -->
+<section class="file-block" id="file-21">
+  <h3 class="file-title">21 · internal/destination/postgres/destination.go（84 行）— 外部 PG 目标端</h3>
+  <p class="file-duty">职责：把记录 upsert 进外部 PostgreSQL 的一张标准表，表名白名单防 SQL 注入。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>var identRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)</b>　★标识符白名单<br>
+      <b>type Destination struct</b>（编译期 var _ engine.Destination = (*Destination)(nil)）<br>
+      dbURL string；table string；pool *pgxpool.Pool
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">NewDestination(ctx, dbURL, table)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ identRe.MatchString(table) ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">否（非法表名）</div><div class="fc-error">return nil, fmt.Errorf("非法目标表名 %q（只允许字母/数字/下划线）", table)<br>★防注入拦截</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-step">pool, err := pgxpool.New(ctx, dbURL)</div>
+        <div class="fc-arrow">↓ err → "连接目标库失败: %w"</div>
+        <div class="fc-step">pool.Ping(ctx) 探活</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ Ping err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">pool.Close() → return "连接目标库失败: %w"</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return &amp;Destination{dbURL, table, pool}, nil</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Save(ctx, records) —— 批量幂等 upsert</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ len(records) == 0 ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-end">return nil（短路）</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-step">tx := d.pool.Begin(ctx)　// 事务开始</div>
+        <div class="fc-arrow">↓ Begin err → "Destination.Save Begin: %w"</div>
+        <div class="fc-step">defer tx.Rollback(ctx)（Commit 后 no-op）</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">batch.Queue: INSERT INTO &lt;d.table&gt; (id, version, updated_at, data)<br>VALUES ($1,$2,$3,$4)<br><b>ON CONFLICT (id) DO UPDATE SET</b><br>version=EXCLUDED.version, updated_at=EXCLUDED.updated_at, data=EXCLUDED.data<br>（表名已过 identRe 白名单，可安全拼接；值仍用占位符）</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">br := tx.SendBatch(ctx, batch)</div>
+        <div class="fc-arrow">◇ for range records: br.Exec() err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">br.Close() → return "Destination.Save batch exec: %w"（回滚整批）</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-step">br.Close() 收末尾错误</div></div>
+        </div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-end">return tx.Commit(ctx)（整批原子提交）</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="iface-box">GetCheckpoint / UpdateCheckpoint / CreateBatch / CompleteBatch 全部空实现——断点由元数据库 sync_jobs 管，外部目标不存断点。</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Close()</div></div>
+    <div class="fc-arrow">↓ if d.pool != nil { d.pool.Close() } → return nil（worker 必须 defer，否则泄漏连接池）</div>
+    <div class="fc-end">return nil</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>防注入（L18, L30-32）：identRe 正则 `^[a-zA-Z_][a-zA-Z0-9_]*$` 白名单校验表名，只有通过校验的表名才允许拼进 SQL；值参数一律 $1..$4 占位符。</li>
+      <li>Save（L57-90）：与 synced_store 同款「整批事务 + pgx.Batch + ON CONFLICT (id) DO UPDATE」幂等 upsert；目标表约定 id TEXT PK / version INT / updated_at TIMESTAMPTZ / data JSONB。</li>
+      <li>事务边界：Begin → SendBatch → 逐条 Exec → Close → Commit，defer Rollback 兜底，任一步错整批回滚。</li>
+      <li>断点相关 4 方法空实现（L93-110）：外部 PG 不存断点，全部交 JobDestination。</li>
+      <li>Close（L46-51）：释放独立连接池，worker 用完必须 defer，否则每次外部同步泄漏一个池。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：pgxpool.New / Ping / Close；pgx.Batch；regexp；engine.ErrNonRetryable(间接)；model.Record ｜ 被调用：destination.NewDestination 工厂；worker 持有并 defer Close</p>
+</section>

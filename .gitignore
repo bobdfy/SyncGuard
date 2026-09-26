@@ -6,3 +6,7 @@ syncguard
 *.swp
 Thumbs.db
 .gocache/
+
+.docs/
+
+./docs

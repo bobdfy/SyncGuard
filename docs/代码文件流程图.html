@@ -1,0 +1,3052 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SyncGuard 代码文件流程图（41 文件逐文件函数级流程图）</title>
+<style>
+:root {
+  --primary: #1864ab;
+  --primary-light: #e7f5ff;
+  --success: #2b8a3e;
+  --success-bg: #ebfbee;
+  --danger: #c92a2a;
+  --danger-bg: #fff5f5;
+  --warning: #e67700;
+  --warning-bg: #fff9db;
+  --gray-800: #343a40;
+  --gray-600: #868e96;
+  --gray-400: #ced4da;
+  --gray-200: #e9ecef;
+  --gray-100: #f1f3f5;
+  --gray-50: #f8f9fa;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  line-height: 1.6;
+  color: var(--gray-800);
+  background: var(--gray-50);
+  margin: 0;
+  padding: 0;
+}
+.container { max-width: 1120px; margin: 0 auto; padding: 24px 20px 60px; }
+
+/* ===== 页头 ===== */
+.page-header {
+  text-align: center;
+  padding: 44px 20px 34px;
+  background: linear-gradient(135deg, #1864ab 0%, #0c8599 100%);
+  color: #fff;
+  margin-bottom: 28px;
+  border-radius: 0 0 18px 18px;
+}
+.page-header h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: 1px; }
+.page-header .subtitle { margin: 0; opacity: 0.92; font-size: 14px; }
+.page-header .meta { margin-top: 12px; font-size: 12.5px; opacity: 0.8; }
+
+/* ===== 总览区 ===== */
+.overview-section {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px 26px;
+  margin-bottom: 22px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.overview-section h2 {
+  margin: 0 0 6px;
+  font-size: 19px;
+  color: var(--primary);
+  border-left: 4px solid var(--primary);
+  padding-left: 12px;
+}
+.overview-section .ov-desc { margin: 0 0 14px; font-size: 13.5px; color: var(--gray-600); }
+
+/* ===== 目录 ===== */
+.toc {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 26px;
+  margin-bottom: 22px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.toc h3 { margin: 0 0 14px; font-size: 16px; color: var(--gray-800); }
+.toc-layers { display: flex; flex-wrap: wrap; gap: 4px 0; }
+.toc-layer {
+  font-weight: 600;
+  color: var(--primary);
+  font-size: 13px;
+  width: 100%;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--gray-200);
+}
+.toc-layer:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.toc-links { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 4px; }
+.toc-links a {
+  color: var(--gray-800);
+  text-decoration: none;
+  font-size: 12.5px;
+  padding: 2px 0;
+}
+.toc-links a:hover { color: var(--primary); text-decoration: underline; }
+.toc-links .num { color: var(--primary); font-weight: 600; }
+
+/* ===== 层 ===== */
+.layer-section { margin-bottom: 26px; scroll-margin-top: 16px; }
+.layer-header {
+  background: linear-gradient(90deg, var(--primary) 0%, #0c8599 100%);
+  color: #fff;
+  padding: 14px 22px;
+  border-radius: 10px 10px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.layer-header .layer-meta { font-size: 13px; opacity: 0.85; font-weight: 400; }
+.layer-body {
+  background: #fff;
+  border-radius: 0 0 10px 10px;
+  padding: 6px 22px 18px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+/* ===== 文件块 ===== */
+.file-block {
+  padding: 22px 0;
+  border-bottom: 1px solid var(--gray-200);
+  scroll-margin-top: 16px;
+}
+.file-block:last-child { border-bottom: none; }
+.file-title {
+  font-size: 16.5px;
+  margin: 0 0 8px;
+  color: var(--gray-800);
+  word-break: break-all;
+}
+.file-duty {
+  margin: 0 0 14px;
+  padding: 9px 14px;
+  background: var(--primary-light);
+  border-left: 3px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  font-size: 14px;
+}
+.file-details { margin-top: 14px; }
+.file-details h4 { margin: 0 0 8px; font-size: 14px; color: var(--gray-800); }
+.file-details ul { margin: 0; padding-left: 20px; font-size: 13.5px; }
+.file-details li { margin-bottom: 5px; }
+.file-deps {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--gray-600);
+  padding: 8px 12px;
+  background: var(--gray-100);
+  border-radius: 6px;
+  word-break: break-all;
+}
+
+/* ===== 流程图 ===== */
+.fc {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  padding: 18px 14px;
+  margin: 12px 0;
+  overflow-x: auto;
+  font-family: "Cascadia Code", "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.fc-row {
+  display: flex;
+  justify-content: center;
+  margin: 3px 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fc-start, .fc-end, .fc-step, .fc-decide, .fc-error {
+  display: inline-block;
+  padding: 7px 16px;
+  border: 2px solid var(--gray-600);
+  border-radius: 6px;
+  background: #fff;
+  text-align: center;
+  max-width: 100%;
+  word-break: break-word;
+}
+.fc-start {
+  border-color: var(--success);
+  background: var(--success-bg);
+  border-radius: 22px;
+  font-weight: 600;
+  color: var(--success);
+}
+.fc-end {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: 22px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.fc-error {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.fc-decide {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+  font-weight: 500;
+}
+.fc-arrow {
+  text-align: center;
+  color: var(--gray-600);
+  font-size: 15px;
+  line-height: 1.2;
+  margin: 1px 0;
+}
+.fc-branches {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  margin: 6px 0;
+  flex-wrap: wrap;
+}
+.fc-branch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 110px;
+  flex: 1;
+  max-width: 360px;
+}
+.fc-branch-label {
+  font-size: 12px;
+  color: var(--warning);
+  font-weight: 600;
+  margin-bottom: 2px;
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.fc-note {
+  font-size: 11.5px;
+  color: var(--gray-600);
+  font-style: italic;
+  text-align: center;
+  margin: 4px 0;
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* ===== 结构体 / 接口框 ===== */
+.struct-box, .iface-box {
+  background: #fff;
+  border: 2px solid var(--gray-600);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 8px auto;
+  max-width: 640px;
+  font-family: "Cascadia Code", "Consolas", "Monaco", monospace;
+  font-size: 13px;
+}
+.struct-box .struct-name, .iface-box .iface-name {
+  font-weight: 700;
+  color: var(--primary);
+  border-bottom: 1px solid var(--gray-200);
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+}
+.struct-box .field, .iface-box .method {
+  padding: 4px 0;
+  border-bottom: 1px dotted var(--gray-200);
+}
+.struct-box .field:last-child, .iface-box .method:last-child { border-bottom: none; }
+.field .field-name { color: #c2255c; }
+.field .field-type { color: var(--primary); }
+.field .field-tag { color: var(--gray-600); font-size: 12px; }
+.field .field-comment { color: var(--gray-600); font-size: 12px; font-style: italic; display: block; }
+.method .method-sig { color: var(--primary); font-weight: 500; }
+.method .method-doc { color: var(--gray-600); font-size: 12px; display: block; margin-top: 2px; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+/* ===== 状态机 ===== */
+.state-machine {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.state-node {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 13px;
+  border: 2px solid;
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.state-pending { border-color: var(--gray-600); background: var(--gray-100); }
+.state-running { border-color: #1971c2; background: #e7f5ff; color: #1971c2; }
+.state-completed { border-color: var(--success); background: var(--success-bg); color: var(--success); }
+.state-failed { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); }
+.state-arrow { color: var(--gray-600); font-size: 18px; }
+
+/* ===== 拓扑图（MQ专用） ===== */
+.topo {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
+  gap: 10px;
+  margin: 10px 0;
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.topo-node {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 2px solid;
+  text-align: center;
+  min-width: 120px;
+  max-width: 200px;
+  font-size: 12.5px;
+}
+.topo-exchange { border-color: #1971c2; background: #e7f5ff; color: #1971c2; font-weight: 600; }
+.topo-queue { border-color: var(--gray-600); background: #fff; }
+.topo-dlq { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); }
+.topo-delay { border-color: var(--warning); background: var(--warning-bg); }
+.topo-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--gray-600);
+  font-size: 18px;
+  font-weight: bold;
+}
+.topo-label {
+  font-size: 10.5px;
+  color: var(--gray-600);
+  display: block;
+  margin-top: 3px;
+  font-weight: 400;
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 768px) {
+  .container { padding: 14px 10px 40px; }
+  .page-header { padding: 30px 14px 24px; }
+  .page-header h1 { font-size: 21px; }
+  .overview-section, .toc { padding: 16px 14px; }
+  .layer-header { font-size: 15px; padding: 12px 14px; }
+  .layer-body { padding: 4px 14px 14px; }
+  .fc { padding: 12px 8px; font-size: 12px; }
+  .fc-branches { gap: 12px; }
+  .fc-branch { min-width: 90px; }
+  .fc-start, .fc-end, .fc-step, .fc-decide, .fc-error { padding: 5px 10px; font-size: 12px; }
+  .struct-box, .iface-box { padding: 10px 12px; font-size: 12px; max-width: 100%; }
+  .file-title { font-size: 15px; }
+}
+@media print {
+  .page-header { background: var(--primary) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .fc, .file-duty, .struct-box, .iface-box, .layer-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+
+<header class="page-header">
+  <h1>SyncGuard 代码文件流程图</h1>
+  <p class="subtitle">41 个非测试 Go 文件 · 逐文件函数级流程图 · 对照源码绘制</p>
+  <p class="meta">配套文档：docs/代码文件顺序复盘.md ｜ 按 10 层分组 ｜ 含两条业务主线总览</p>
+</header>
+
+<div class="container">
+
+<!-- ==================== 主线总览 ==================== -->
+<section class="overview-section" id="overview-a">
+  <h2>主线 A：一次同步任务从触发到完成</h2>
+  <p class="ov-desc">调用链：41 RunJob → 16 Outbox.Insert（同事务）→ 35 Dispatcher 轮询 → 29 Producer 发布 → 36 Worker.Handle（抢锁/心跳/runSync）→ 11 engine.Run 分页循环 → 17 synced_store 幂等落库</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">开始：用户点击"运行任务"</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">41 handler/job.go · RunJob<br>查任务验权 → 构造 payload</span></div>
+    <div class="fc-arrow">↓ 同一事务</div>
+    <div class="fc-row"><span class="fc-step">16 outbox_store.go · Insert<br>BEGIN → INSERT outbox → COMMIT</span></div>
+    <div class="fc-arrow">↓ 提交后立即返回（不阻塞）</div>
+    <div class="fc-row"><span class="fc-step">35 worker/dispatcher.go · Run<br>每 2s 轮询 ListUnsent(20)</span></div>
+    <div class="fc-arrow">↓ 按 DelayMs 分流</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">DelayMs = 0</div>
+        <div class="fc-row"><span class="fc-step">29 Producer.Publish<br>→ 主交换机 → 主队列</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">DelayMs &gt; 0</div>
+        <div class="fc-row"><span class="fc-step">29 Producer.PublishDelayed<br>publisher confirm 等待确认</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓ 成功才 MarkSent；失败下轮重试</div>
+    <div class="fc-row"><span class="fc-step">36 worker/worker.go · Handle<br>QoS=1 单任务串行</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ 解析 JSON + 查任务</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">已 completed</div>
+        <div class="fc-row"><span class="fc-end">Ack 跳过（幂等）</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">未完成 ↓</div>
+        <div class="fc-row"><span class="fc-step">32 lock · Acquire<br>SET NX EX 抢分布式锁</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓ 抢到锁</div>
+    <div class="fc-row"><span class="fc-step">taskCtx / hbCtx 分离<br>心跳 goroutine 每 10s 续约（lease=30s）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">runSync 装配链</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">源端</div>
+        <div class="fc-row"><span class="fc-step">22 source.Factory<br>→ 23/24/25 具体源<br>→ 34 熔断装饰器</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">目标端</div>
+        <div class="fc-row"><span class="fc-step">nil→19 内部存储<br>其他→20/21 外部 PG<br>→ 18 job_destination 包进度</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">11 engine.go · Run<br>分页循环（每页 200 条）<br>Fetch → Save → 更新断点</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">17 synced_store.go · Save<br>ON CONFLICT 幂等 upsert（整批事务）</span></div>
+    <div class="fc-arrow">↓ 停心跳 → 释放锁</div>
+    <div class="fc-row"><span class="fc-decide">◇ 结果判定</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">成功</div>
+        <div class="fc-row"><span class="fc-end">Ack 确认</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">熔断打开</div>
+        <div class="fc-row"><span class="fc-step">冷却 60s → 延迟重投</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">可重试</div>
+        <div class="fc-row"><span class="fc-step">指数退避重投<br>5s×2^attempt（封顶2min）</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">超限/永久错误/租约丢失</div>
+        <div class="fc-row"><span class="fc-error">Nack → DLQ（27）</span></div>
+      </div>
+    </div>
+    <div class="fc-note">所有重投路径均走"事务：更新状态 + 写 outbox"，从根上杜绝丢消息</div>
+  </div>
+</section>
+
+<section class="overview-section" id="overview-b">
+  <h2>主线 B：一次对账</h2>
+  <p class="ov-desc">调用链：41 Reconcile → 37 reconciler.Reconcile → 22 source.NewSource 拉源端全量 + 17 synced_store 拉目标端全量 → compareMaps 纯函数对比四类差异 → 返回前端</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">开始：用户点击"对账"</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">41 handler/job.go · Reconcile<br>取 userID + jobID → 调对账引擎</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">37 reconciler.go · Reconcile</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">源端</div>
+        <div class="fc-row"><span class="fc-step">22 source.Factory.NewSource<br>分页拉取源端全量记录<br>→ 装入 map[id]Record</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">目标端</div>
+        <div class="fc-row"><span class="fc-step">17 synced_store.ListRecordsByUserAndConnection<br>按 user+connection 分页拉取<br>→ 装入 map[id]Record</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">compareMaps（纯函数）<br>遍历两 map 对比</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">源有目标无</div>
+        <div class="fc-row"><span class="fc-error">missing_in_target</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">目标有源无</div>
+        <div class="fc-row"><span class="fc-error">extra_in_target</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">版本不同</div>
+        <div class="fc-row"><span class="fc-error">version_mismatch</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">版本同但内容不同</div>
+        <div class="fc-row"><span class="fc-error">content_mismatch<br>（SHA256 hash 兜底）</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">返回差异列表到前端</span></div>
+    <div class="fc-note">compareMaps 是纯函数（不碰 DB/网络），可直接喂 map 单测</div>
+  </div>
+</section>
+
+<!-- ==================== 目录 ==================== -->
+<nav class="toc" id="toc">
+  <h3>文件目录（点击跳转）</h3>
+  <div class="toc-layers">
+    <div class="toc-layer">第 1 层 · 入口装配（01–02）</div>
+    <div class="toc-links">
+      <a href="#file-01"><span class="num">01</span> cmd/server/main.go</a>
+      <a href="#file-02"><span class="num">02</span> cmd/worker/main.go</a>
+    </div>
+    <div class="toc-layer">第 2 层 · 领域模型（03–07）</div>
+    <div class="toc-links">
+      <a href="#file-03"><span class="num">03</span> model/record.go</a>
+      <a href="#file-04"><span class="num">04</span> model/job.go</a>
+      <a href="#file-05"><span class="num">05</span> model/connection.go</a>
+      <a href="#file-06"><span class="num">06</span> model/user.go</a>
+      <a href="#file-07"><span class="num">07</span> model/diff.go</a>
+    </div>
+    <div class="toc-layer">第 3 层 · 引擎抽象（08–11）</div>
+    <div class="toc-links">
+      <a href="#file-08"><span class="num">08</span> engine/errors.go</a>
+      <a href="#file-09"><span class="num">09</span> engine/source.go</a>
+      <a href="#file-10"><span class="num">10</span> engine/destination.go</a>
+      <a href="#file-11"><span class="num">11</span> engine/engine.go</a>
+    </div>
+    <div class="toc-layer">第 4 层 · 数据访问（12–19）</div>
+    <div class="toc-links">
+      <a href="#file-12"><span class="num">12</span> repository/db.go</a>
+      <a href="#file-13"><span class="num">13</span> repository/user_store.go</a>
+      <a href="#file-14"><span class="num">14</span> repository/connection_store.go</a>
+      <a href="#file-15"><span class="num">15</span> repository/job_store.go</a>
+      <a href="#file-16"><span class="num">16</span> repository/outbox_store.go</a>
+      <a href="#file-17"><span class="num">17</span> repository/synced_store.go</a>
+      <a href="#file-18"><span class="num">18</span> repository/job_destination.go</a>
+      <a href="#file-19"><span class="num">19</span> repository/internal_destination.go</a>
+    </div>
+    <div class="toc-layer">第 5 层 · 目标端（20–21）</div>
+    <div class="toc-links">
+      <a href="#file-20"><span class="num">20</span> destination/factory.go</a>
+      <a href="#file-21"><span class="num">21</span> destination/postgres/destination.go</a>
+    </div>
+    <div class="toc-layer">第 6 层 · 数据源（22–25）</div>
+    <div class="toc-links">
+      <a href="#file-22"><span class="num">22</span> source/factory.go</a>
+      <a href="#file-23"><span class="num">23</span> source/mock/generator.go</a>
+      <a href="#file-24"><span class="num">24</span> source/github/source.go</a>
+      <a href="#file-25"><span class="num">25</span> source/postgres/source.go</a>
+    </div>
+    <div class="toc-layer">第 7 层 · 协调组件（26–34）</div>
+    <div class="toc-links">
+      <a href="#file-26"><span class="num">26</span> redisclient/client.go</a>
+      <a href="#file-27"><span class="num">27</span> mq/connection.go</a>
+      <a href="#file-28"><span class="num">28</span> mq/message.go</a>
+      <a href="#file-29"><span class="num">29</span> mq/producer.go</a>
+      <a href="#file-30"><span class="num">30</span> mq/consumer.go</a>
+      <a href="#file-31"><span class="num">31</span> mq/backoff.go</a>
+      <a href="#file-32"><span class="num">32</span> lock/connection_lock.go</a>
+      <a href="#file-33"><span class="num">33</span> circuitbreaker/circuit_breaker.go</a>
+      <a href="#file-34"><span class="num">34</span> circuitbreaker/source.go</a>
+    </div>
+    <div class="toc-layer">第 8 层 · Worker 编排（35–36）</div>
+    <div class="toc-links">
+      <a href="#file-35"><span class="num">35</span> worker/dispatcher.go</a>
+      <a href="#file-36"><span class="num">36</span> worker/worker.go</a>
+    </div>
+    <div class="toc-layer">第 9 层 · 对账引擎（37）</div>
+    <div class="toc-links">
+      <a href="#file-37"><span class="num">37</span> reconciliation/reconciler.go</a>
+    </div>
+    <div class="toc-layer">第 10 层 · HTTP 层（38–41）</div>
+    <div class="toc-links">
+      <a href="#file-38"><span class="num">38</span> middleware/auth.go</a>
+      <a href="#file-39"><span class="num">39</span> handler/auth.go</a>
+      <a href="#file-40"><span class="num">40</span> handler/connection.go</a>
+      <a href="#file-41"><span class="num">41</span> handler/job.go</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ==================== 第 1 层 ==================== -->
+<section class="layer-section" id="layer-1">
+  <div class="layer-header">
+    <span>第 1 层 · 入口装配（Server / Worker）</span>
+    <span class="layer-meta">2 个文件 · 197 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-01">
+  <h3 class="file-title">01 · cmd/server/main.go（95 行源码，实际 122 行）— HTTP 服务端入口与依赖装配</h3>
+  <p class="file-duty">职责：加载环境变量，装配 DB / RabbitMQ / Store / Handler，注册 Gin 路由并以 goroutine 启动 HTTP 服务，阻塞等待 Ctrl+C 退出。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">main()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">godotenv.Load() 加载 .env</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">databaseURL = os.Getenv("DATABASE_URL")</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ databaseURL == "" ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-row"><span class="fc-error">log.Fatal("DATABASE_URL 未设置")</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否 ↓</div>
+        <div class="fc-row"><span class="fc-step">middleware.SetJWTSecret(JWT_SECRET)</span></div>
+      </div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ SetJWTSecret err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-row"><span class="fc-error">log.Fatalf("JWT_SECRET: %v")  // 空密钥拒绝启动</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否 ↓</div>
+        <div class="fc-row"><span class="fc-step">repository.NewDB(ctx, databaseURL) → db</span></div>
+      </div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ NewDB err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-row"><span class="fc-error">log.Fatalf("数据库连接失败: %v")</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否 ↓</div>
+        <div class="fc-row"><span class="fc-step">defer db.Close()</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">NewUserStore / NewConnectionStore / NewJobStore / NewOutboxStore(db)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">reconciliation.NewReconciler(db, connStore)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">rabbitURL = os.Getenv("RABBITMQ_URL")</span></div>
+    <div class="fc-row"><span class="fc-decide">◇ rabbitURL == "" ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-row"><span class="fc-error">log.Fatal("RABBITMQ_URL 未设置")</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否 ↓</div>
+        <div class="fc-row"><span class="fc-step">mq.Connect(rabbitURL) → conn, ch（声明交换机/队列/DLQ）</span></div>
+      </div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ mq.Connect err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-row"><span class="fc-error">log.Fatalf("RabbitMQ 连接失败: %v")</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否 ↓</div>
+        <div class="fc-row"><span class="fc-step">defer conn.Close() / defer ch.Close()</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">mq.NewProducer(ch, ExchangeName, RoutingKey)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">NewAuthHandler(userStore) / NewConnectionHandler(connStore)</span></div>
+    <div class="fc-row"><span class="fc-step">NewJobHandler(jobStore, connStore, db, producer, reconciler, outboxStore)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">r = gin.Default()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">公开路由: POST /api/register、/api/login</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">api := r.Group("/api"); api.Use(middleware.AuthRequired())</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">受保护路由: logout / connections CRUD / jobs CRUD / jobs/:id/run / jobs/:id/reconcile / records</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">r.Static("/static","./web"); r.StaticFile("/","./web/login.html")</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ PORT 环境变量为空 ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-row"><span class="fc-step">port = "9090"（默认）</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否 ↓</div>
+        <div class="fc-row"><span class="fc-step">port = os.Getenv("PORT")</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">go func(){ r.Run(":"+port) }()</span></div>
+    <div class="fc-row"><span class="fc-decide">◇ r.Run err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是（goroutine 内）</div>
+        <div class="fc-row"><span class="fc-error">log.Fatalf("服务启动失败: %v")</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否 ↓</div>
+        <div class="fc-row"><span class="fc-step">log.Printf("SyncGuard 已启动: http://localhost:%s")</span></div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">signal.Notify(quit, os.Interrupt); &lt;-quit  // 阻塞</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">log.Println("正在关闭...")；main 返回，defer 逆序关闭 ch/conn/db</span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>main()</code> 是纯装配函数：无业务逻辑，所有失败均为启动期硬失败，直接 <code>log.Fatal</code> 退出（DATABASE_URL / JWT_SECRET / RABBITMQ_URL 三处空值校验）。</li>
+      <li>JWT 密钥通过 <code>middleware.SetJWTSecret</code> 注入而非常量；空串会返回 err，服务拒绝启动（L26–29）。</li>
+      <li>路由分两层：公开（register/login）+ <code>AuthRequired()</code> 中间件保护的 /api 组，数据源 CRUD 与同步任务 CRUD 全部挂在受保护组下。</li>
+      <li>HTTP 服务在独立 goroutine 中 <code>r.Run</code>，主线程靠 <code>&lt;-quit</code> 阻塞等待 SIGINT；未实现真正的优雅 Shutdown（http.Server.Shutdown），退出依赖 defer 逆序 Close。</li>
+      <li>Producer 复用主 channel <code>ch</code>（注意与 worker 端另开 publishCh + confirm 不同），用于向主交换机投递任务消息。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：repository.NewDB/NewUserStore/NewConnectionStore/NewJobStore/NewOutboxStore、reconciliation.NewReconciler、mq.Connect/NewProducer、handler.New*Handler、middleware.SetJWTSecret/AuthRequired、gin ｜ 被调用：进程入口，无其他包调用</p>
+</section>
+<section class="file-block" id="file-02">
+  <h3 class="file-title">02 · cmd/worker/main.go（102 行源码，实际 131 行）— Worker 消费进程入口与消息循环</h3>
+  <p class="file-duty">职责：装配 DB/RabbitMQ/Redis，启动 outbox 搬运协程，主循环阻塞消费队列消息并交给 worker.Handler 处理。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">main()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">godotenv.Load()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ DATABASE_URL == "" ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatal("DATABASE_URL 未设置")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">repository.NewDB(ctx, databaseURL)</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ NewDB err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatalf("数据库连接失败")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">defer db.Close()</span></div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ RABBITMQ_URL == "" ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatal("RABBITMQ_URL 未设置")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">mq.Connect(rabbitURL) → conn, ch</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ mq.Connect err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatalf("RabbitMQ 连接失败")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">defer conn.Close() / defer ch.Close()</span></div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ REDIS_ADDR == "" ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatal("REDIS_ADDR 未设置")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">redisclient.NewClient(ctx, REDIS_ADDR, REDIS_PASS)</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ NewClient err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatalf("Redis 连接失败")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">defer rdb.Close()</span></div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">lock.NewConnectionLock(rdb.Client()) → connLock</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">publishCh = conn.Channel()  // 为延迟重投单独开 channel</span></div>
+    <div class="fc-row"><span class="fc-decide">◇ conn.Channel err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatalf("创建发布 channel 失败")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">defer publishCh.Close(); publishCh.Confirm(false)</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ Confirm err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatalf("开启 publisher confirm 失败")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">mq.NewProducer(publishCh, ExchangeName, RoutingKey)</span></div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">mq.NewConsumer(ch, QueueName)  // 内部 Qos(prefetch=1)</span></div>
+    <div class="fc-row"><span class="fc-decide">◇ NewConsumer err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatalf("创建 Consumer 失败")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">consumer.Consume() → msgs</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ Consume err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">log.Fatalf("订阅队列失败")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">NewOutboxStore(db); worker.NewDispatcher(producer, outboxStore)</span></div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">h = worker.New(db, connLock, rdb, outboxStore)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">dispatcherCtx, cancelDispatcher = context.WithCancel(bg); defer cancelDispatcher()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">go dispatcher.Start(dispatcherCtx)  // 周期扫 outbox 投递</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">signal.Notify(quit, os.Interrupt)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ for { select { ... } } 循环</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">case &lt;-quit</div>
+        <div class="fc-row"><span class="fc-step">log "正在关闭 Worker..."</span></div>
+        <div class="fc-row"><span class="fc-end">return（defer 逆序 cancelDispatcher→rdb→publishCh→ch→conn→db）</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">case msg, ok := &lt;-msgs</div>
+        <div class="fc-row"><span class="fc-decide">◇ ok == false ?</span></div>
+        <div class="fc-row"><span class="fc-branches">
+          <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-row"><span class="fc-error">log "消息 channel 已关闭"; return</span></span></span>
+          <span class="fc-branch"><span class="fc-branch-label">否 ↓</span><span class="fc-row"><span class="fc-step">h.Handle(msg)  // 同步阻塞处理一条</span></span></span>
+        </span></div>
+        <div class="fc-row"><span class="fc-arrow">↓ 回到 select</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>与 server 不同：Worker 必须额外连 Redis（<code>redisclient.NewClient</code>），并构造连接级分布式锁 <code>lock.NewConnectionLock</code>，防止同一数据源被多 Worker 并发同步。</li>
+      <li>发布与消费通道分离：消费用主 channel <code>ch</code>，延迟重投另开 <code>publishCh</code> 并 <code>Confirm(false)</code> 开启 publisher confirm，确保 Broker 真正收到消息。</li>
+      <li>Consumer 内部 <code>Qos(prefetch=1)</code>，配合主循环同步 <code>h.Handle(msg)</code>，实现串行处理、一次只干一个任务。</li>
+      <li>Outbox 搬运工 <code>dispatcher.Start</code> 跑在独立 ctx 中，主循环 return 时通过 <code>defer cancelDispatcher()</code> 一并取消。</li>
+      <li>退出路径有三条：SIGINT、msgs channel 关闭、Handle 处理完毕后继续 select；无 panic recover。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：repository.NewDB/NewOutboxStore、mq.Connect/NewConsumer/NewProducer、redisclient.NewClient、lock.NewConnectionLock、worker.NewDispatcher/New ｜ 被调用：进程入口</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 2 层 ==================== -->
+<section class="layer-section" id="layer-2">
+  <div class="layer-header">
+    <span>第 2 层 · 领域模型（model）</span>
+    <span class="layer-meta">5 个文件 · 70 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-03">
+  <h3 class="file-title">03 · internal/model/record.go（20 行）— 源端通用记录 DTO</h3>
+  <p class="file-duty">职责：定义从 Source 拉取的统一记录结构，作为 Source.Fetch 的返回单元和 Destination.Save 的入参单元。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">
+      <b>Record</b>（源端通用记录，对应 V0 文档 JSON）<br>
+      · ID　string　`json:"id"`　— 记录唯一 ID，如 "record_1001"<br>
+      · Version　int　`json:"version"`　— 版本号，用于判新旧/版本不一致<br>
+      · UpdatedAt　time.Time　`json:"updated_at"`　— 最后更新时间<br>
+      · Data　json.RawMessage　`json:"data"`　— 业务原始 JSON 透传，不解析
+    </span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-note">Data 用 json.RawMessage 延迟反序列化：引擎只搬运不解释业务字段，目标端原样落库</span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>无方法、无状态机，纯数据结构（POJO）。</li>
+      <li><code>Version</code> 是幂等与对账的关键字段：Destination.Save 据此做 ON CONFLICT 判断，Diff 据此判定 version_mismatch。</li>
+      <li><code>Data</code> 用 <code>json.RawMessage</code>（即 []byte）保留原始字节，避免引擎层对不同数据源业务 schema 的强耦合。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：encoding/json、time ｜ 被调用：engine.Source.Fetch 返回值、engine.Destination.Save 入参、engine.Diff 关联</p>
+</section>
+<section class="file-block" id="file-04">
+  <h3 class="file-title">04 · internal/model/job.go（21 行）— 同步任务领域模型与状态常量</h3>
+  <p class="file-duty">职责：定义 SyncJob 实体（用户下发的一次同步任务）及其四种生命周期状态常量。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">
+      <b>SyncJob</b><br>
+      · ID　int　`json:"id"`　— 自增主键<br>
+      · UserID　int　`json:"user_id"`　— 所属用户<br>
+      · ConnectionID　int　`json:"connection_id"`　— 源端连接 ID<br>
+      · TargetConnectionID　*int　`json:"target_connection_id"`　— 目标端，可空（nil=默认内部存储）<br>
+      · TaskName　string　`json:"task_name"`　— 任务名，断点/批次以此区分<br>
+      · SyncContent　string　`json:"sync_content"`　— 同步内容（同步什么对象）<br>
+      · Status　string　`json:"status"`　— 状态机字段（见下）<br>
+      · Cursor　string　`json:"cursor"`　— 断点游标，崩溃续传点<br>
+      · TotalCount　int　`json:"total_count"`　— 已同步条数<br>
+      · ErrorMsg　string　`json:"error_msg"`　— 失败原因<br>
+      · StartedAt　time.Time　`json:"started_at"`<br>
+      · FinishedAt　*time.Time　`json:"finished_at"`　— 可空，未结束为 nil
+    </span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">状态机（Status 字段流转）</span></div>
+    <div class="fc-row">
+      <span class="fc-start">pending（新建）</span>
+      <span class="fc-arrow">↓ 被 Worker 领取执行</span>
+      <span class="fc-step">running（执行中，StartedAt 写入）</span>
+    </div>
+    <div class="fc-row">
+      <span class="fc-step">running</span>
+      <span class="fc-branches">
+        <span class="fc-branch">
+          <span class="fc-branch-label">全部页成功</span>
+          <span class="fc-arrow">↓</span>
+          <span class="fc-end">completed（FinishedAt=now, TotalCount 落库）</span>
+        </span>
+        <span class="fc-branch">
+          <span class="fc-branch-label">任一页 err / ctx 取消</span>
+          <span class="fc-arrow">↓</span>
+          <span class="fc-error">failed（ErrorMsg 记录原因，Cursor 保留供续跑）</span>
+        </span>
+      </span>
+    </div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>四个状态常量：<code>JobStatusPending/Running/Completed/Failed</code>，字符串字面量，与 DB status 列一一对应。</li>
+      <li><code>TargetConnectionID *int</code> 为指针类型——nil 表示"目标=默认内部 PG 存储"，非空表示自定义目标连接。</li>
+      <li><code>Cursor</code> 是断点续传核心：引擎每写完一页推进，崩溃后从该值继续，最多丢一页。</li>
+      <li><code>FinishedAt *time.Time</code> 用指针区分"未结束"与"零值时间"。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：time ｜ 被调用：repository.JobStore（CRUD）、handler.JobHandler、worker.Handle</p>
+</section>
+<section class="file-block" id="file-05">
+  <h3 class="file-title">05 · internal/model/connection.go（10 行）— 数据源连接配置模型</h3>
+  <p class="file-duty">职责：描述一个外部数据源/目的地的连接配置（类型 + URL），由用户在 Web 端创建。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">
+      <b>Connection</b><br>
+      · ID　int　`json:"id"`　— 自增主键<br>
+      · UserID　int　`json:"user_id"`　— 所属用户（数据隔离）<br>
+      · Name　string　`json:"name"`　— 用户起的别名<br>
+      · SourceType　string　`json:"source_type"`　— 数据源类型（mock/github/gitlab...），决定用哪个 Source 实现<br>
+      · SourceURL　string　`json:"source_url"`　— 连接串/API 地址（含凭证）<br>
+      · CreatedAt　time.Time　`json:"created_at"`
+    </span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>纯结构体，无方法。<code>SourceType</code> 是工厂分发键——Worker 根据它实例化对应的 engine.Source 实现。</li>
+      <li><code>UserID</code> 实现多租户隔离：所有 CRUD 查询都带 user_id 条件。</li>
+      <li>SyncJob.TargetConnectionID 也指向本表 ID，故同一套 Connection 既可作源也可作目标。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：time ｜ 被调用：repository.ConnectionStore、handler.ConnectionHandler、worker 工厂（按 SourceType 构造 Source/Destination）</p>
+</section>
+<section class="file-block" id="file-06">
+  <h3 class="file-title">06 · internal/model/user.go（9 行）— 用户账号模型</h3>
+  <p class="file-duty">职责：描述登录账号，只存密码哈希，不存明文。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">
+      <b>User</b><br>
+      · ID　int　`json:"id"`<br>
+      · UserName　string　`json:"user_name"`　— 登录名，唯一<br>
+      · PasswordHash　string　`json:"password_hash"`　— 密码哈希（bcrypt 等），禁止存明文<br>
+      · CreatedAt　time.Time　`json:"created_at"`
+    </span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>纯结构体。<code>PasswordHash</code> 字段名即约束：登录时比对哈希而非明文。</li>
+      <li>无 Role/权限字段，鉴权仅靠 JWT 中的 user_id。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：time ｜ 被调用：repository.UserStore、handler.AuthHandler（Register/Login/Logout）</p>
+</section>
+<section class="file-block" id="file-07">
+  <h3 class="file-title">07 · internal/model/diff.go（10 行）— 对账差异结果模型</h3>
+  <p class="file-duty">职责：表示一次对账中发现的一条源端 vs 目标端不一致记录，及其差异类型。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">
+      <b>Diff</b><br>
+      · SourceID　string　`json:"source_id"`　— 源端记录 ID，如 "issue_42"<br>
+      · DiffType　string　`json:"diff_type"`　— 差异类型（见下四种）<br>
+      · SourceVersion　int　`json:"source_version"`　— 源端当前版本号<br>
+      · TargetVersion　int　`json:"target_version"`　— 目标端版本号（缺失时为 0）<br>
+      · SourceHash　string　`json:"source_hash"`　— 源端数据 Hash<br>
+      · TargetHash　string　`json:"target_hash"`　— 目标端数据 Hash
+    </span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">DiffType 四态（对账引擎比对结果）</span></div>
+    <div class="fc-row">
+      <span class="fc-branches">
+        <span class="fc-branch"><span class="fc-branch-label">missing_in_target</span><span class="fc-row"><span class="fc-step">源端有、目标端缺 → 同步漏了</span></span></span>
+        <span class="fc-branch"><span class="fc-branch-label">extra_in_target</span><span class="fc-row"><span class="fc-step">目标端有、源端无 → 源端已删或多写</span></span></span>
+        <span class="fc-branch"><span class="fc-branch-label">version_mismatch</span><span class="fc-row"><span class="fc-step">版本号不同 → 目标端过时</span></span></span>
+        <span class="fc-branch"><span class="fc-branch-label">content_mismatch</span><span class="fc-row"><span class="fc-step">版本同但 Hash 不同 → 被篡改/碰撞</span></span></span>
+      </span>
+    </div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>纯结果 DTO，无方法。差异分类由 reconciliation.Reconciler 计算。</li>
+      <li>用 (SourceVersion, TargetVersion) 与 (SourceHash, TargetHash) 两对字段同时定位"版本差"和"内容差"。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：无 ｜ 被调用：reconciliation.Reconciler、handler.JobHandler.Reconcile 返回给前端</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 3 层 ==================== -->
+<section class="layer-section" id="layer-3">
+  <div class="layer-header">
+    <span>第 3 层 · 引擎抽象（engine 接口）</span>
+    <span class="layer-meta">4 个文件 · 121 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-08">
+  <h3 class="file-title">08 · internal/engine/errors.go（7 行）— 可重试/不可重试错误哨兵</h3>
+  <p class="file-duty">职责：定义 ErrNonRetryable 哨兵错误，标记永久失败，供 Worker 直接进 DLQ 而非退避重投。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">底层出错时</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">fmt.Errorf("...: %w", ErrNonRetryable)  // 包装</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">◇ 上层 errors.Is(err, ErrNonRetryable) ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是（配置错误：owner/repo 格式错、source_type 不支持）</div>
+        <div class="fc-row"><span class="fc-error">直接进 DLQ，不重试</span></div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否（瞬时错误：网络抖动、DB 繁忙）</div>
+        <div class="fc-row"><span class="fc-step">走退避重投（延迟队列）</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>导出单例 <code>var ErrNonRetryable = errors.New("不可重试的永久错误")</code>。</li>
+      <li>约定用法：底层用 <code>%w</code> 包装，上层 <code>errors.Is</code> 判定——不要用字符串匹配。</li>
+      <li>意义：避免配置类永久错误白白消耗重试次数、延迟用户发现。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：errors ｜ 被调用：各 Source 实现（mock/github）、worker.Handle（判定后决定 ACK/重投/DLQ）</p>
+</section>
+<section class="file-block" id="file-09">
+  <h3 class="file-title">09 · internal/engine/source.go（16 行）— 数据源接口契约</h3>
+  <p class="file-duty">职责：抽象"从外部系统拉数据"的能力，引擎只依赖此接口，不关心具体是 GitHub 还是 Mock。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="iface-box">
+      <b>Source</b> 接口（所有外部数据源实现：Mock / GitHub / GitLab ...）<br><br>
+      · <b>Fetch(ctx, cursor string, limit int) ([]model.Record, nextCursor string, hasMore bool, err error)</b><br>
+      　— 从 cursor 位置取一页；cursor="" 表示从头开始<br>
+      　— nextCursor="" 表示无下一页；hasMore=false 时引擎停止分页<br>
+      　— ctx 用于取消（Worker 收到退出信号时中断拉取）<br><br>
+      · <b>Close() error</b><br>
+      　— 释放连接池等资源；无资源实现返回 nil；调用方应 defer Close
+    </span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-note">调用时机：engine.Run 的分页循环每轮调用一次 Fetch；工厂按 Connection.SourceType 选择实现</span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>分页契约靠三元组 (records, nextCursor, hasMore) 表达；引擎据此决定是否 UpdateCheckpoint 与继续循环。</li>
+      <li>接口不含任何业务字段，依赖倒置：新增数据源只写新实现，Engine 零改动。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：context、internal/model ｜ 被调用：engine.Engine（持有 src 字段）、worker 工厂（构造具体实现）</p>
+</section>
+<section class="file-block" id="file-10">
+  <h3 class="file-title">10 · internal/engine/destination.go（24 行）— 数据目的地接口契约</h3>
+  <p class="file-duty">职责：抽象"写数据 + 管断点 + 管批次"的能力，V0 唯一实现是 repository.SyncedStore（写 PG）。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="iface-box">
+      <b>Destination</b> 接口<br><br>
+      · <b>Save(ctx, records []model.Record) error</b><br>
+      　— 批量 upsert：有则更新、无则插入（ON CONFLICT DO UPDATE）<br>
+      　— 幂等：同一条写两次结果一致；整批事务原子，全成功或全失败<br><br>
+      · <b>GetCheckpoint(ctx, taskName string) (lastCursor string, err error)</b><br>
+      　— 读断点；查不到返回 ""（非错误），由调用方判断是否首次运行<br><br>
+      · <b>UpdateCheckpoint(ctx, taskName, cursor string) error</b><br>
+      　— 每页写完后 upsert 游标（INSERT ... ON CONFLICT(task_name) DO UPDATE）<br><br>
+      · <b>CreateBatch(ctx) (batchID int64, err error)</b><br>
+      　— 引擎启动时插一条 status='running' 批次记录，返回自增 ID<br><br>
+      · <b>CompleteBatch(ctx, batchID int64, status string, totalCount int) error</b><br>
+      　— 引擎结束时更新 status/finished_at/total_count<br><br>
+      · <b>Close() error</b> — 释放资源
+    </span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>六个方法覆盖引擎全部写侧需求：落库、断点读/写、批次开始/结束、资源释放。</li>
+      <li>幂等性由 SQL 层保证：Save 与 UpdateCheckpoint 都基于 <code>ON CONFLICT</code> upsert。</li>
+      <li>断点以 taskName 为键，不同任务互不干扰；首次运行 GetCheckpoint 返回空串即从头拉。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：context、internal/model ｜ 被调用：engine.Engine.Run（持有 dst 字段并调用全部 6 个方法）、repository.SyncedStore 实现</p>
+</section>
+<section class="file-block" id="file-11">
+  <h3 class="file-title">11 · internal/engine/engine.go（74 行源码，实际 99 行）— 同步引擎核心骨架</h3>
+  <p class="file-duty">职责：分页拉 Source → 批量写 Destination → 每页推进断点，defer 兜底把异常批次标记 failed，崩溃最多丢一页。</p>
+
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">New(src, dst, pageSize) → *Engine（构造，存三字段）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-start">Engine.Run(ctx, taskName)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">cursor, err = dst.GetCheckpoint(ctx, taskName)  // 读断点</span></div>
+    <div class="fc-row"><span class="fc-decide">◇ err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">return fmt.Errorf("GetCheckpoint is err: %w")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">batchID, err = dst.CreateBatch(ctx)  // 开 running 批次</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">return fmt.Errorf("CreateBatch: %w")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">totalCount=0; ok=false<br>defer{ if !ok { dst.CompleteBatch(Background(), batchID,"failed",totalCount) } }</span></div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">for {  // 分页循环</span></div>
+    <div class="fc-row"><span class="fc-decide">◇(a) select { case &lt;-ctx.Done(): ; default: }</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">ctx 已取消</div><div class="fc-row"><span class="fc-error">return ctx.Err()  // ok 仍 false → defer 记 failed</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">未取消 ↓(b)</div><div class="fc-row"><span class="fc-step">records, nextCursor, hasMore, err = src.Fetch(ctx, cursor, pageSize)</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ Fetch err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">return fmt.Errorf("Fetch is err: %w")  // defer 记 failed</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓(c)</div><div class="fc-row"><span class="fc-decide">◇ len(records) &gt; 0 ?</span></div></div>
+    </div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-row"><span class="fc-step">dst.Save(ctx, records)  // ON CONFLICT upsert</span></div>
+        <div class="fc-row"><span class="fc-decide">◇ Save err != nil ?</span></div>
+        <div class="fc-row"><span class="fc-branches">
+          <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-row"><span class="fc-error">return fmt.Errorf("Save: %w")</span></span></span>
+          <span class="fc-branch"><span class="fc-branch-label">否 ↓</span><span class="fc-row"><span class="fc-step">totalCount += len(records)</span></span></span>
+        </span></div>
+      </div>
+      <div class="fc-branch"><div class="fc-branch-label">否（空页）</div><div class="fc-row"><span class="fc-step">跳过 Save/累加，直接判断 hasMore</span></div></div>
+    </div>
+    <div class="fc-arrow">↓(d)</div>
+    <div class="fc-row"><span class="fc-decide">◇ hasMore == false ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是 → break</div><div class="fc-row"><span class="fc-step">跳出分页循环</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓(e)</div><div class="fc-row"><span class="fc-step">dst.UpdateCheckpoint(ctx, taskName, nextCursor)</span></div></div>
+    </div>
+    <div class="fc-row"><span class="fc-decide">◇ UpdateCheckpoint err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">return fmt.Errorf("UpdateCheckpoint: %w")</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">cursor = nextCursor；回到 for 顶部</span></div></div>
+    </div>
+    <div class="fc-arrow">↓ 循环正常 break</div>
+    <div class="fc-row"><span class="fc-step">dst.CompleteBatch(ctx, batchID, "completed", totalCount)</span></div>
+    <div class="fc-row"><span class="fc-decide">◇ CompleteBatch err != nil ?</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-row"><span class="fc-error">return fmt.Errorf("Complete is err: %w")  // ok 仍 false，defer 再补一次 failed</span></div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否 ↓</div><div class="fc-row"><span class="fc-step">ok = true；log.Printf("同步完成 task=%s total=%d")</span></div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">return nil（defer 因 ok==true 不再写 failed）</span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><b>断点保证</b>：每页先 Save 再 UpdateCheckpoint（步骤 c→e），崩溃重启从 cursor 继续，最多重复/丢失一页。</li>
+      <li><b>defer 兜底</b>：<code>ok</code> 标志位——任何 return（Fetch/Save/UpdateCheckpoint 失败、ctx 取消）都会让 ok 保持 false，defer 用 <code>context.Background()</code>（注意不是已取消的 ctx）把批次补记为 failed，避免重复写两次。</li>
+      <li><b>取消检查</b>：循环开头 select ctx.Done()，Worker 退出信号可及时中断分页；注释明确"交给 defer 统一记 failed"。</li>
+      <li><b>空页处理</b>：<code>len(records)&gt;0</code> 才 Save/累加，空页直接判 hasMore，避免无意义写库。</li>
+      <li><b>边界</b>：最后一页（hasMore=false）不调用 UpdateCheckpoint 就 break——断点已在倒数第二页推进，最后一页落库后即完成。</li>
+      <li>所有错误用 <code>fmt.Errorf(": %w")</code> 包装向上透传，不在引擎内吞错。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：context/fmt/log、本包 Source/Destination 接口、internal/model.Record ｜ 被调用：worker.Handle（任务消息到来时 new Engine 并 Run）</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 4 层 ==================== -->
+<section class="layer-section" id="layer-4">
+  <div class="layer-header">
+    <span>第 4 层 · 数据访问（repository）</span>
+    <span class="layer-meta">8 个文件 · 520 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-12">
+  <h3 class="file-title">12 · internal/repository/db.go（54 行）— pgxpool 连接池封装</h3>
+  <p class="file-duty">职责：封装 *pgxpool.Pool，只负责连接的创建、验证、借用与关闭，本文件不写任何业务 SQL。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>type DB struct</b><br>
+      pool *pgxpool.Pool（未导出，外部只能经 Pool() 读取）
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Start: NewDB(ctx, databaseURL)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">pool := pgxpool.New(ctx, databaseURL)</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ err != nil ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-error">return nil, fmt.Errorf("pgxpool.New: %w", err)</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-step">pool.Ping(ctx) 探活</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ Ping err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <div class="fc-branch-label">是</div>
+            <div class="fc-error">pool.Close() 清理 → return nil, fmt.Errorf("pool.Ping: %w", err)</div>
+          </div>
+          <div class="fc-branch">
+            <div class="fc-branch-label">否</div>
+            <div class="fc-step">log.Println("postgres connected")</div>
+            <div class="fc-arrow">↓</div>
+            <div class="fc-end">return &amp;DB{pool: pool}, nil</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">其余方法：Pool() 直接 return db.pool；Begin(ctx) 调 db.pool.Begin(ctx)，err 包裹 "DB Begin: %w"；Close() 在 db.pool != nil 时 pool.Close()（幂等，Close 后再用 SQL 会 panic）。</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>NewDB（L32-43）：先 pgxpool.New 建池，再 Ping 验证；Ping 失败必须先 pool.Close() 再返回错误，避免连接池泄漏。</li>
+      <li>选择 pgxpool 而非 database/sql：纯 Go 驱动免 CGO，原生支持 COPY、LISTEN/NOTIFY、advisory lock。</li>
+      <li>Pool()（L50-52）：只读访问器，不暴露字段，便于日后拦截加日志/metrics。</li>
+      <li>Begin（L56-62）：开启事务交给调用方 Commit/Rollback，供 outbox「业务写库 + 写 outbox」同生共死使用。</li>
+      <li>Close（L71-75）：带 nil 判空，通常 defer 在 main 退出前调用。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：pgxpool.New / pool.Ping / pool.Close / pool.Begin ｜ 被调用：main 装配；NewUserStore/NewConnectionStore/NewJobStore/NewOutboxStore/NewSyncedStore 注入 *DB</p>
+</section>
+<section class="file-block" id="file-13">
+  <h3 class="file-title">13 · internal/repository/user_store.go（29 行）— users 表读写</h3>
+  <p class="file-duty">职责：用户注册（Create）与按用户名查用户（GetByUsername），支撑登录校验。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type UserStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓ NewUserStore(db) 构造注入</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">Create(ctx, username, passwordHash)</div>
+        <div class="fc-start">Start</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">Exec: INSERT INTO users(username, password_hash) VALUES ($1, $2)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return fmt.Errorf("UserStore Create err: %w", err)</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return nil</div></div>
+        </div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">GetByUsername(ctx, username)</div>
+        <div class="fc-start">Start</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">QueryRow: SELECT id, username, password_hash, created_at FROM users WHERE username = $1</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">Scan(&amp;u.ID, &amp;u.UserName, &amp;u.PasswordHash, &amp;u.CreatedAt)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ err != nil ?（含 sql.ErrNoRows）</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return nil, fmt.Errorf("UserStore Get err: %w", err)</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return &amp;u, nil</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>Create（L18-24）：单条 Exec 插入，密码只存 passwordHash（哈希值，不存明文）。</li>
+      <li>GetByUsername（L26-35）：QueryRow + Scan 单行读取；未找到时 pgx 返回 ErrNoRows，被统一包裹为 "UserStore Get err" 上抛，由 service 层判空返回「用户不存在」。</li>
+      <li>无多租户过滤（users 表本身就是账号维度），username 应为唯一键，靠 DB 唯一约束兜底。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().Exec / QueryRow；model.User ｜ 被调用：auth/service 注册与登录 handler</p>
+</section>
+<section class="file-block" id="file-14">
+  <h3 class="file-title">14 · internal/repository/connection_store.go（83 行）— connections 表 CRUD</h3>
+  <p class="file-duty">职责：管理用户的数据源连接配置，所有写操作带 user_id 双条件做租户隔离。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type ConnectionStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Create(ctx, userID, name, sourceType, sourceURL)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">Exec: INSERT INTO connections(user_id, name, source_type, source_url) VALUES($1,$2,$3,$4)</div>
+    <div class="fc-arrow">↓ err → return fmt.Errorf("ConnectionStore err: %w", err)</div>
+    <div class="fc-end">return nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">ListByUser(ctx, userID) 多行查询</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">Query: SELECT id,user_id,name,source_type,source_url,created_at FROM connections WHERE user_id = $1</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">defer rows.Close()（防连接泄露）；conns := []model.Connection{}</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ rows.Next() ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">循环内</div>
+        <div class="fc-step">rows.Scan(&amp;c.ID,&amp;c.UserID,&amp;c.Name,&amp;c.SourceType,&amp;c.SourceURL,&amp;c.CreatedAt)</div>
+        <div class="fc-arrow">↓ Scan err → return 错误</div>
+        <div class="fc-step">conns = append(conns, c)</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">遍历结束</div>
+        <div class="fc-step">rows.Err() 检查中途错误</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-end">return conns, nil</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">GetByID(ctx, id)</div></div>
+    <div class="fc-arrow">↓ QueryRow: SELECT ... FROM connections WHERE id = $1 → Scan 6 字段 → err 包裹 "ConnectionStore GetByID err"</div>
+    <div class="fc-end">return &amp;c, nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Update / Delete（多租户防护重点）</div></div>
+    <div class="fc-step">UPDATE connections SET name=$1, source_type=$2, source_url=$3 WHERE id=$4 AND user_id=$5</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">DELETE FROM connections WHERE id=$1 AND user_id=$2</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">★ WHERE id=? AND user_id=? 双条件：用户 A 无法改/删用户 B 的数据源；0 行受影响也不报错（调用方按需检查 RowsAffected）。</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>ListByUser（L28-65）：标准多行扫描范式——Query 拿游标 → defer rows.Close → for rows.Next() 逐行 Scan → rows.Err() 兜底，顺序与 SELECT 列严格一致。</li>
+      <li>GetByID（L67-74）：注意此处只按 id=$1 查，不带 user_id（factory 用它取任意目标连接配置），租户隔离由上层路由负责。</li>
+      <li>Update（L78-87）/ Delete（L91-100）：均以 WHERE id=? AND user_id=? 双重条件，是多租户防护的核心。</li>
+      <li>错误统一 fmt.Errorf("...: %w", err) 包装，保留原始 pgx 错误链。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().Exec/Query/QueryRow；model.Connection ｜ 被调用：连接管理 handler；destination.NewDestination（GetByID）</p>
+</section>
+<section class="file-block" id="file-15">
+  <h3 class="file-title">15 · internal/repository/job_store.go（93 行）— sync_jobs 任务表</h3>
+  <p class="file-duty">职责：同步任务的创建、查询、状态流转与删除，状态字段驱动前端进度展示。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type JobStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Create(ctx, userID, connectionID, targetConnectionID, taskName, syncContent)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">QueryRow: INSERT INTO sync_jobs(user_id,connection_id,target_connection_id,task_name,sync_content,status) VALUES($1..$5,'pending') RETURNING id</div>
+    <div class="fc-arrow">↓ Scan(&amp;jobID)</div>
+    <div class="fc-decide">◇ err != nil ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return 0, fmt.Errorf("JobStore.Create: %w", err)</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return jobID, nil（初始 status='pending'）</div></div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">GetByID(ctx, jobID)</div></div>
+    <div class="fc-arrow">↓ QueryRow: SELECT 12 字段 FROM sync_jobs WHERE id = $1 → Scan 12 字段 → err 包裹 "JobStore.GetByID: %w"</div>
+    <div class="fc-end">return &amp;j, nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">UpdateStatus / UpdateStatusInTx（同一 SQL，两个入口）</div></div>
+    <div class="fc-step">UPDATE sync_jobs SET status=$2, total_count=$3, cursor=$4, error_msg=$5,<br>finished_at = CASE WHEN $6 IN ('completed','failed') THEN $7 ELSE finished_at END<br>WHERE id=$1</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">UpdateStatus（连接池）</div>
+        <div class="fc-step">s.db.Pool().Exec(ctx, sql, ..., time.Now())</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">UpdateStatusInTx（外部事务）</div>
+        <div class="fc-step">tx.Exec(ctx, 同 SQL) —— 与「写 outbox」同事务，同生共死</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">★ CASE 表达式：只有终态 completed/failed 才写 finished_at=now()，running 时保留原值。</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">ListByUser(ctx, userID)</div></div>
+    <div class="fc-arrow">↓ Query: SELECT 12 字段 FROM sync_jobs WHERE user_id = $1 ORDER BY started_at DESC → defer rows.Close → for Next() Scan append → rows.Err()</div>
+    <div class="fc-end">return jobs, nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Delete(ctx, id, userID)</div></div>
+    <div class="fc-arrow">↓ Exec: DELETE FROM sync_jobs WHERE id=$1 AND user_id=$2（双条件防越权删）</div>
+    <div class="fc-end">return nil</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>Create（L21-32）：INSERT 时硬编码 status='pending'，用 RETURNING id 取回自增主键给调用方。</li>
+      <li>UpdateStatus（L48-59）：单语句同时更新 status/total_count/cursor/error_msg，并用 CASE 只在终态落 finished_at，避免 running 覆盖结束时间。</li>
+      <li>UpdateStatusInTx（L64-74）：SQL 与 UpdateStatus 完全一致，唯一区别是用调用方传入的 pgx.Tx 执行——供「更新任务状态 + outbox 落消息」原子提交。</li>
+      <li>ListByUser（L77-99）：按 started_at DESC 倒序，最新任务在前；多行扫描范式同 connection_store。</li>
+      <li>Delete（L103-112）：WHERE id AND user_id 双条件租户隔离。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().QueryRow/Query/Exec；pgx.Tx；model.SyncJob ｜ 被调用：JobDestination（GetByID/UpdateStatus/UpdateStatusInTx）、任务 handler</p>
+</section>
+<section class="file-block" id="file-16">
+  <h3 class="file-title">16 · internal/repository/outbox_store.go（52 行）— outbox 发件箱表</h3>
+  <p class="file-duty">职责：实现事务性发件箱模式——业务事务内先落消息，后台搬运工再扫描补发。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type OutboxStore struct</b> { db *DB }　|　<b>OutboxMessage</b> { ID int64; Payload []byte }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Insert(ctx, tx pgx.Tx, payload) —— 必须传外部事务</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ tx 由调用方 Begin 好了吗？（本函数不开启事务）</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">是（业务事务进行中）</div>
+        <div class="fc-step">tx.Exec: INSERT INTO outbox(payload) VALUES($1)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return fmt.Errorf("OutboxStore Insert: %w", err) → 调用方 Rollback，业务一并回滚</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return nil（消息与业务数据同事务提交）</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">ListUnsent(ctx, limit)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">Query: SELECT id, payload FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT $1</div>
+    <div class="fc-arrow">↓ defer rows.Close()；msgs := make([]OutboxMessage, 0, limit)</div>
+    <div class="fc-step">for rows.Next(): Scan(&amp;m.ID,&amp;m.Payload) → append</div>
+    <div class="fc-arrow">↓ rows.Err() 检查</div>
+    <div class="fc-end">return msgs, nil（按 id 升序保证先发先处理）</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">MarkSent(ctx, id int64)</div></div>
+    <div class="fc-arrow">↓ Exec: UPDATE outbox SET sent_at = NOW() WHERE id = $1</div>
+    <div class="fc-arrow">↓ err → "OutboxStore MarkSent: %w"</div>
+    <div class="fc-end">return nil（幂等：重复标记只是覆盖 sent_at）</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>Insert（L27-34）：tx 由外部传入是发件箱模式的关键——业务写库与写 outbox 在同一事务内，要么一起提交要么一起回滚，杜绝「业务成功消息丢失」。</li>
+      <li>ListUnsent（L37-57）：sent_at IS NULL 筛未发，ORDER BY id 保证顺序消费，LIMIT 控制批量大小；用预分配切片 make(...,0,limit) 减少扩容。</li>
+      <li>MarkSent（L60-67）：sent_at=NOW() 软标记，失败的消息下次 ListUnsent 仍会被捞出重发，实现至少一次投递。</li>
+      <li>本文件不管理事务边界：Begin/Commit/Rollback 全部在调用方（worker）手里。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：外部 pgx.Tx.Exec；DB.Pool().Query/Exec ｜ 被调用：worker（Begin → JobStore.UpdateStatusInTx + OutboxStore.Insert → Commit）；发件箱 relay 循环调 ListUnsent/MarkSent</p>
+</section>
+<section class="file-block" id="file-17">
+  <h3 class="file-title">17 · internal/repository/synced_store.go（96 行）— synced_records 内部落地表</h3>
+  <p class="file-duty">职责：把同步进来的记录批量 upsert 进内部库，并按 user/connection 维度分页查询对账。</p>
+  <div class="fc">
+    <div class="struct-box"><b>type SyncedStore struct</b> { db *DB }</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">SaveWithUser(ctx, userID, connectionID, records)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ len(records) == 0 ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-end">return nil（空批次短路，不开事务）</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-step">tx := s.db.Pool().Begin(ctx)</div>
+        <div class="fc-arrow">↓ Begin err → return "SaveWithUser Begin: %w"</div>
+        <div class="fc-step">defer tx.Rollback(ctx)（Commit 成功后为 no-op）</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">构造 pgx.Batch{}，逐条 Queue：<br>INSERT INTO synced_records(id, version, updated_at, data, user_id, connection_id)<br>VALUES ($1..$6)<br><b>ON CONFLICT (connection_id, id) DO UPDATE SET</b><br>version=EXCLUDED.version, updated_at=EXCLUDED.updated_at, data=EXCLUDED.data</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">br := tx.SendBatch(ctx, batch)</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ for range records: br.Exec() err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">br.Close() → return "SaveWithUser batch exec: %w"（defer Rollback 回滚整批）</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-step">br.Close() 收集批次末尾错误</div></div>
+        </div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-end">return tx.Commit(ctx)（整批原子提交，不留半页数据）</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <div class="fc-branch-label">ListRecordsByUser(ctx, userID, limit, offset)</div>
+        <div class="fc-step">Query: SELECT id,version,updated_at,data FROM synced_records WHERE user_id=$1 ORDER BY id LIMIT $2 OFFSET $3</div>
+        <div class="fc-arrow">↓ defer rows.Close → Scan append → rows.Err()</div>
+        <div class="fc-end">return records</div>
+      </div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">ListRecordsByUserAndConnection(ctx, userID, connectionID, limit, offset)</div>
+        <div class="fc-step">Query: SELECT id,version,updated_at,data FROM synced_records WHERE user_id=$1 AND connection_id=$2 ORDER BY id LIMIT $3 OFFSET $4</div>
+        <div class="fc-arrow">↓ 同上行扫描范式</div>
+        <div class="fc-end">return records（对账引擎按单 connection 精确对比）</div>
+      </div>
+    </div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>SaveWithUser（L32-66）：★幂等核心——ON CONFLICT (connection_id, id) DO UPDATE，同一逻辑记录重复同步只更新 version/updated_at/data，不报错不插重。</li>
+      <li>事务边界：Begin → SendBatch 一次网络往返发整批 → 逐条 br.Exec() 回收结果 → br.Close() → tx.Commit；defer tx.Rollback 保证任何中途错误都回滚，整批原子。</li>
+      <li>多源隔离：唯一键是 (connection_id, id) 而非 id 单列，不同数据源即使记录 id 相同也互不覆盖。</li>
+      <li>空批次短路（L33-35）：len==0 直接返回，避免无意义事务开销。</li>
+      <li>两个 List 方法仅 WHERE 条件差一个 connection_id，均按 id 排序 + limit/offset 分页。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：DB.Pool().Begin/Query；pgx.Batch/SendBatch；model.Record ｜ 被调用：internalSyncDest.Save（内部目标）、对账查询 handler</p>
+</section>
+<section class="file-block" id="file-18">
+  <h3 class="file-title">18 · internal/repository/job_destination.go（78 行）— 装饰器：把引擎进度写进 sync_jobs</h3>
+  <p class="file-duty">职责：装饰 engine.Destination——数据落真正的 store，同时把 totalCount/cursor 进度累加并回写 sync_jobs。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>type JobDestination struct</b>（编译期 var _ engine.Destination = (*JobDestination)(nil)）<br>
+      store engine.Destination　// 真实落点：internalSyncDest 或外部 PG<br>
+      jobStore *JobStore<br>
+      jobID int<br>
+      totalCount int　// 内存累加，避免每页查 DB<br>
+      cursor string　// GetCheckpoint 时缓存，CreateBatch 不清零
+    </div>
+    <div class="fc-arrow">↓ NewJobDestination(store, jobStore, jobID)</div>
+    <div class="fc-arrow">↓</div>
+    <div class="iface-box"><b>engine.Destination 接口方法分层流程</b></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Save(ctx, records) —— 引擎每拉一页调一次</div></div>
+    <div class="fc-step">① d.store.Save(ctx, records) 委托真实落点写数据（幂等由 store 自己保证）</div>
+    <div class="fc-arrow">↓ err → return fmt.Errorf("JobDestination.Save: %w", err)</div>
+    <div class="fc-step">② d.totalCount += len(records)　内存累加本页条数</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">③ jobStore.UpdateStatus(ctx, jobID, "running", d.totalCount, "", "")　写进度给前端轮询</div>
+    <div class="fc-end">return</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">GetCheckpoint(ctx, taskName) —— 引擎启动调一次</div></div>
+    <div class="fc-step">① job, err := d.jobStore.GetByID(ctx, d.jobID)</div>
+    <div class="fc-arrow">↓ err → "GetCheckpoint: %w"</div>
+    <div class="fc-step">② d.totalCount = job.TotalCount　★缓存总数到内存</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">③ d.cursor = job.Cursor　★缓存断点游标</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-end">return job.Cursor, nil（首次运行 cursor="" 从头开始）</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">UpdateCheckpoint(ctx, taskName, cursor)</div></div>
+    <div class="fc-arrow">↓ 透传 jobStore.UpdateStatus(jobID, "running", d.totalCount, cursor, "") —— 状态仍 running，只更新 cursor</div>
+    <div class="fc-end">return</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">CreateBatch(ctx) —— 引擎启动时调</div></div>
+    <div class="fc-step">jobStore.UpdateStatus(jobID, "running", <b>d.totalCount</b>, <b>d.cursor</b>, "")</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">★关键细节：totalCount/cursor 沿用 GetCheckpoint 缓存的旧值，绝不清零——崩溃重启后进度不丢、从断点续跑。</div>
+    <div class="fc-arrow">↓ err → "CreateBatch: %w"</div>
+    <div class="fc-end">return int64(d.jobID), nil</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">CompleteBatch(ctx, batchID, status, totalCount)</div></div>
+    <div class="fc-arrow">↓ jobStore.UpdateStatus(jobID, status, totalCount, "", "") —— status 透传（completed/failed），不硬编码</div>
+    <div class="fc-end">return</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Close()</div></div>
+    <div class="fc-arrow">↓ return d.store.Close()（透传释放底层资源，如外部 PG 连接池）</div>
+    <div class="fc-end">return</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>装饰器模式：Save 委托 d.store.Save，自身只做「计数 + 回写进度」，不关心数据落哪。</li>
+      <li>GetCheckpoint（L61-71）：★把 job.TotalCount / job.Cursor 缓存到结构体字段，这是 CreateBatch 能「不清零」的前提。</li>
+      <li>CreateBatch（L92-101）：状态置 running 但 total_count/cursor 用缓存旧值，重启续跑的关键。</li>
+      <li>Save（L43-53）：先写数据成功才累加计数并更新进度；写失败直接返回，进度不前进。</li>
+      <li>CompleteBatch（L110-114）：status 由引擎传入（失败是 failed），配合 UpdateStatus 的 CASE 自动落 finished_at。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：engine.Destination.store；JobStore.GetByID/UpdateStatus；model.Record ｜ 被调用：worker 装配为 engine.Destination 传给同步引擎</p>
+</section>
+<section class="file-block" id="file-19">
+  <h3 class="file-title">19 · internal/repository/internal_destination.go（35 行）— 内部存储适配器</h3>
+  <p class="file-duty">职责：把 SyncedStore 包装成完整 engine.Destination 接口——只真实现 Save，其余方法空操作。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>type internalSyncDest struct</b>（编译期 var _ engine.Destination = (*internalSyncDest)(nil)）<br>
+      store *SyncedStore；userID int；connectionID int
+    </div>
+    <div class="fc-arrow">↓ NewInternalDest(store, userID, connectionID) 返回 engine.Destination</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Save(ctx, records) —— 唯一有真实逻辑的方法</div></div>
+    <div class="fc-arrow">↓ return d.store.SaveWithUser(ctx, d.userID, d.connectionID, records)</div>
+    <div class="fc-arrow">↓（带上 user_id/connection_id 归属，走整批事务 + ON CONFLICT upsert）</div>
+    <div class="fc-end">return SaveWithUser 的错误</div>
+    <div class="fc-arrow">↓</div>
+    <div class="iface-box">以下 4 个方法空实现（断点/进度统一由外层 JobDestination 管理）：</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">GetCheckpoint</div><div class="fc-step">return "", nil</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">UpdateCheckpoint</div><div class="fc-step">return nil</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">CreateBatch</div><div class="fc-step">return 0, nil</div></div>
+      <div class="fc-branch"><div class="fc-branch-label">CompleteBatch / Close</div><div class="fc-step">return nil（无资源可释放）</div></div>
+    </div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>存在原因（注释 L13-18）：SyncedStore 清理后只剩「写数据」能力，而 JobDestination.store 字段需要完整 engine.Destination 类型，故用适配器补齐接口。</li>
+      <li>Save（L26-28）：唯一真实方法，委托 SaveWithUser 并注入 userID/connectionID，供多租户隔离与对账。</li>
+      <li>GetCheckpoint/UpdateCheckpoint/CreateBatch/CompleteBatch/Close 全部空实现——内部路径的断点与进度由外层 JobDestination 统一管，避免双写。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：SyncedStore.SaveWithUser ｜ 被调用：worker 在 targetConnectionID==0（写内部库）时 NewInternalDest 装配进 JobDestination</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 5 层 ==================== -->
+<section class="layer-section" id="layer-5">
+  <div class="layer-header">
+    <span>第 5 层 · 目标端（destination）</span>
+    <span class="layer-meta">2 个文件 · 108 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-20">
+  <h3 class="file-title">20 · internal/destination/factory.go（24 行）— 目标端工厂</h3>
+  <p class="file-duty">职责：按目标连接配置的 source_type 选择并构造对应的外部 engine.Destination。</p>
+  <div class="fc">
+    <div class="fc-row"><div class="fc-start">NewDestination(ctx, connStore, targetConnectionID, syncContent)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-step">conn, err := connStore.GetByID(ctx, targetConnectionID) 查目标连接配置</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ err != nil ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">return nil, fmt.Errorf("查询目标连接配置失败: %w", err)</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-decide">◇ switch conn.SourceType</div>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <div class="fc-branch-label">case "postgres"</div>
+            <div class="fc-step">table := strings.SplitN(syncContent, ":", 2)[0]<br>（取 "table[:pk]" 冒号前的表名）</div>
+            <div class="fc-arrow">↓</div>
+            <div class="fc-step">return postgres.NewDestination(ctx, conn.SourceURL, table)</div>
+          </div>
+          <div class="fc-branch">
+            <div class="fc-branch-label">default</div>
+            <div class="fc-error">return nil, fmt.Errorf("不支持的目标类型: %w: %s", engine.ErrNonRetryable, conn.SourceType)<br>★包装不可重试错误</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-note">注意：targetConnectionID==0 表示「写内部存储」，由调用方自行分支，本函数只负责外部目标。</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>先查连接（L22-25）：复用 ConnectionStore.GetByID 拿 source_type 与 source_url。</li>
+      <li>表名解析（L30）：syncContent 格式为 "table[:pk]"，SplitN 最多切 2 段取第 0 段作为目标表名。</li>
+      <li>目前只支持 postgres；未知类型返回带 engine.ErrNonRetryable 包装的错误，让引擎知道不要重试。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：ConnectionStore.GetByID；postgres.NewDestination；strings.SplitN；engine.ErrNonRetryable ｜ 被调用：worker 创建外部目标端时调用</p>
+</section>
+<section class="file-block" id="file-21">
+  <h3 class="file-title">21 · internal/destination/postgres/destination.go（84 行）— 外部 PG 目标端</h3>
+  <p class="file-duty">职责：把记录 upsert 进外部 PostgreSQL 的一张标准表，表名白名单防 SQL 注入。</p>
+  <div class="fc">
+    <div class="struct-box">
+      <b>var identRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)</b>　★标识符白名单<br>
+      <b>type Destination struct</b>（编译期 var _ engine.Destination = (*Destination)(nil)）<br>
+      dbURL string；table string；pool *pgxpool.Pool
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">NewDestination(ctx, dbURL, table)</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ identRe.MatchString(table) ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">否（非法表名）</div><div class="fc-error">return nil, fmt.Errorf("非法目标表名 %q（只允许字母/数字/下划线）", table)<br>★防注入拦截</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">是</div>
+        <div class="fc-step">pool, err := pgxpool.New(ctx, dbURL)</div>
+        <div class="fc-arrow">↓ err → "连接目标库失败: %w"</div>
+        <div class="fc-step">pool.Ping(ctx) 探活</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-decide">◇ Ping err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">pool.Close() → return "连接目标库失败: %w"</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-end">return &amp;Destination{dbURL, table, pool}, nil</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Save(ctx, records) —— 批量幂等 upsert</div></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide">◇ len(records) == 0 ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-end">return nil（短路）</div></div>
+      <div class="fc-branch">
+        <div class="fc-branch-label">否</div>
+        <div class="fc-step">tx := d.pool.Begin(ctx)　// 事务开始</div>
+        <div class="fc-arrow">↓ Begin err → "Destination.Save Begin: %w"</div>
+        <div class="fc-step">defer tx.Rollback(ctx)（Commit 后 no-op）</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">batch.Queue: INSERT INTO &lt;d.table&gt; (id, version, updated_at, data)<br>VALUES ($1,$2,$3,$4)<br><b>ON CONFLICT (id) DO UPDATE SET</b><br>version=EXCLUDED.version, updated_at=EXCLUDED.updated_at, data=EXCLUDED.data<br>（表名已过 identRe 白名单，可安全拼接；值仍用占位符）</div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-step">br := tx.SendBatch(ctx, batch)</div>
+        <div class="fc-arrow">◇ for range records: br.Exec() err != nil ?</div>
+        <div class="fc-branches">
+          <div class="fc-branch"><div class="fc-branch-label">是</div><div class="fc-error">br.Close() → return "Destination.Save batch exec: %w"（回滚整批）</div></div>
+          <div class="fc-branch"><div class="fc-branch-label">否</div><div class="fc-step">br.Close() 收末尾错误</div></div>
+        </div>
+        <div class="fc-arrow">↓</div>
+        <div class="fc-end">return tx.Commit(ctx)（整批原子提交）</div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="iface-box">GetCheckpoint / UpdateCheckpoint / CreateBatch / CompleteBatch 全部空实现——断点由元数据库 sync_jobs 管，外部目标不存断点。</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><div class="fc-start">Close()</div></div>
+    <div class="fc-arrow">↓ if d.pool != nil { d.pool.Close() } → return nil（worker 必须 defer，否则泄漏连接池）</div>
+    <div class="fc-end">return nil</div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>防注入（L18, L30-32）：identRe 正则 `^[a-zA-Z_][a-zA-Z0-9_]*$` 白名单校验表名，只有通过校验的表名才允许拼进 SQL；值参数一律 $1..$4 占位符。</li>
+      <li>Save（L57-90）：与 synced_store 同款「整批事务 + pgx.Batch + ON CONFLICT (id) DO UPDATE」幂等 upsert；目标表约定 id TEXT PK / version INT / updated_at TIMESTAMPTZ / data JSONB。</li>
+      <li>事务边界：Begin → SendBatch → 逐条 Exec → Close → Commit，defer Rollback 兜底，任一步错整批回滚。</li>
+      <li>断点相关 4 方法空实现（L93-110）：外部 PG 不存断点，全部交 JobDestination。</li>
+      <li>Close（L46-51）：释放独立连接池，worker 用完必须 defer，否则每次外部同步泄漏一个池。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：pgxpool.New / Ping / Close；pgx.Batch；regexp；engine.ErrNonRetryable(间接)；model.Record ｜ 被调用：destination.NewDestination 工厂；worker 持有并 defer Close</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 6 层 ==================== -->
+<section class="layer-section" id="layer-6">
+  <div class="layer-header">
+    <span>第 6 层 · 数据源（source）</span>
+    <span class="layer-meta">4 个文件 · 525 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-22">
+  <h3 class="file-title">22 · internal/source/factory.go（56 行）— 按 source_type 工厂创建数据源</h3>
+  <p class="file-duty">职责：根据 connectionID 查库拿到 source_type，用 switch 构造对应 engine.Source 实现，调用方只依赖接口。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Start NewSource(ctx, db, connectionStore, connectionID, syncContent)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-step">connectionStore.GetByID(ctx, connectionID) 查 connections 表</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇err != nil?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-error">返回 error「查询连接配置失败」</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-step">拿到 conn.SourceType / conn.SourceURL</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ switch conn.SourceType</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">"mock"</span><span class="fc-step">mock.NewGenerator(1000)</span><span class="fc-arrow">↓</span><span class="fc-end">返回 *engine.Source</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">"github"</span><span class="fc-step">SplitN(SourceURL,"/",2) 切 owner/repo</span><span class="fc-arrow">↓ ◇len!=2?</span><span class="fc-decide">◇格式错误→ErrNonRetryable</span><span class="fc-arrow">↓</span><span class="fc-step">github.NewSource(owner,repo)</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">"postgres"</span><span class="fc-step">postgres.NewSource(ctx, SourceURL, syncContent)</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">default</span><span class="fc-error">返回 ErrNonRetryable「不支持的数据源类型」</span></span>
+    </span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>NewSource</code>（L32）先 <code>GetByID</code> 查连接配置，失败直接 wrap error 返回（L34-37）。</li>
+      <li>GitHub 分支用 <code>strings.SplitN(conn.SourceURL, "/", 2)</code>（L53）切 owner/repo，n=2 防止 repo 名含 "/" 被切碎；切片长度 !=2 时返回 <code>engine.ErrNonRetryable</code>（L55）。</li>
+      <li>mock 分支固定 <code>mock.NewGenerator(1000)</code> 造 1000 条内存数据（L42）。</li>
+      <li>postgres 分支把 <code>syncContent</code>（表名:主键）透传给 <code>postgres.NewSource</code>（L63）。</li>
+      <li>default 分支返回 <code>ErrNonRetryable</code>，新增数据源只需加 case，Engine 零改动（依赖倒置）。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：repository.ConnectionStore.GetByID、mock.NewGenerator、github.NewSource、postgres.NewSource、engine.ErrNonRetryable ｜ 被调用：Engine/Worker 在执行同步前用它构造 Source</p>
+</section>
+<section class="file-block" id="file-23">
+  <h3 class="file-title">23 · internal/source/mock/generator.go（88 行）— 内存模拟数据源</h3>
+  <p class="file-duty">职责：预生成 N 条内存记录，实现 engine.Source，用于 V0 阶段验证分页/游标/对账逻辑。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="iface-box">engine.Source: Fetch / Close</span></div>
+    <div class="fc-row"><span class="struct-box">Generator{ records []Record; recordsFast map[string]int }（ID→切片下标）</span></div>
+    <div class="fc-row"><span class="fc-start">Start NewGenerator(count)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 循环 i=0..count-1</span></div>
+    <div class="fc-row"><span class="fc-step">rec.ID="record_%04d"；Version=1+rand[0,5)；Data=`{}`</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇i==0 / i%20==0 / 否则</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">i==0</span><span class="fc-step">UpdatedAt=baseTime(2026-01-01 UTC)</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">i%20==0</span><span class="fc-step">沿用上一条时间戳（~5% 同毫秒并发写）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">else</span><span class="fc-step">UpdatedAt=baseTime+i*30s</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ recordsFast[rec.ID]=i 建立索引</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-start">Fetch(ctx, cursor, limit)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ select ctx.Done()? → 返回 ctx.Err()</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇limit&lt;=0? → error「limit必须大于0」</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇cursor!=""? → recordsFast[cursor] 定位下标；找不到→error「cursor无效」</span></div>
+    <div class="fc-row"><span class="fc-step">start = index+1（无 cursor 则 start=0）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇start &gt;= len(records)? → 返回空页 hasMore=false</span></div>
+    <div class="fc-row"><span class="fc-step">end=min(start+limit,len)；page=records[start:end]</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-decide">◇hasMore = end &lt; len(records) ?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-step">nextCursor=page末条.ID</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-step">nextCursor=""</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-end">return page, nextCursor, hasMore, nil</span></div>
+    <div class="fc-row"><span class="fc-note">Close()：纯内存，直接 return nil</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>NewGenerator</code>（L33）用 <code>recordsFast</code> map 把 cursor→切片下标 O(1) 定位；i%20==0 时沿用上条 UpdatedAt，模拟并发写同毫秒。</li>
+      <li><code>Fetch</code>（L68）开头 <code>select ctx.Done()</code> 响应取消；limit&lt;=0 直接报错。</li>
+      <li>游标是「最后一条记录的 ID」，start=index+1 后移一位（keyset 语义，跳过自身）。</li>
+      <li>hasMore 判断为 <code>end &lt; len(records)</code>（L103），nextCursor 仅在有更多时取本页末条 ID。</li>
+      <li>编译期断言 <code>var _ engine.Source = (*Generator)(nil)</code>（L24）。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：model.Record、engine.Source、encoding/json/rand/time ｜ 被调用：factory.go 的 NewSource（source_type=mock）</p>
+</section>
+<section class="file-block" id="file-24">
+  <h3 class="file-title">24 · internal/source/github/source.go（245 行）— GitHub Issues 数据源（最大源实现）</h3>
+  <p class="file-duty">职责：把 GitHub Issues API（页码分页）适配成 engine.Source 接口（cursor 分页），Issue→Record 转换并过滤 PR。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">Source{owner, repo, httpClient(30s超时), token=os.Getenv("GITHUB_TOKEN")}</span></div>
+    <div class="fc-row"><span class="fc-start">Fetch(ctx, cursor, limit)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ① cursor(页码字符串)→page：空=1，否则 strconv.Atoi(cursor)</span></div>
+    <div class="fc-row"><span class="fc-step">② 拼 URL: /repos/{owner}/{repo}/issues?state=all&amp;sort=updated&amp;direction=asc&amp;per_page={limit}&amp;page={page}</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ③ http.NewRequestWithContext(GET)</span></div>
+    <div class="fc-row"><span class="fc-step">Header: Accept=application/vnd.github.v3+json</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇token != ""?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-step">Authorization: Bearer {token}（5000 req/h）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-note">未认证 60 req/h</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ④ httpClient.Do(req)，defer resp.Body.Close()</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇网络错误? → error「请求 GitHub API 失败」（Worker Nack→DLQ 可重试）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ⑤ ◇resp.StatusCode != 200?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">404</span><span class="fc-error">wrap ErrNonRetryable + SourceError{404}（仓库不存在，不重试）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">403/429</span><span class="fc-decide">◇SourceError{403/429} 限流，可重试走退避</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">其他非200</span><span class="fc-error">直接返回 SourceError</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ⑥ 200：json.NewDecoder(Body).Decode(&amp;issues)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ⑦ for issue := range issues：◇issue.PullRequest != nil ?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">非nil=PR</span><span class="fc-error">continue 跳过（过滤 PR）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">nil=Issue</span><span class="fc-step">组装 gitHubIssueData{Title,State,User.Login,makeLabels(Labels拍平[]string),Comments,Body=truncate(Body,500)}</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ json.Marshal(issueData)；失败→continue</span></div>
+    <div class="fc-row"><span class="fc-step">append Record{ ID="issue_{number}", Version=int(UpdatedAt.Unix()), UpdatedAt, Data }</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ⑧ ◇hasMore = len(issues) == limit ?（GitHub 无总数，靠条数猜）</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">==limit</span><span class="fc-step">nextCursor=strconv.Itoa(page+1)</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">&lt;limit</span><span class="fc-step">nextCursor=""（最后一页）</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-end">return records, nextCursor, hasMore, nil</span></div>
+    <div class="fc-row"><span class="fc-note">辅助：makeLabels（[]Label→[]string 只取 Name）；truncate（&gt;500 截断+ "..."）；Close()=nil</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><strong>页码↔游标适配</strong>：cursor 就是页码字符串（空="第1页"，"1"="第2页"），nextCursor=strconv.Itoa(page+1)，把 cursor-based 接口套在 page-based API 上。</li>
+      <li><strong>hasMore 猜测</strong>：L237 <code>hasMore := len(issues) == limit</code>，GitHub 不返回总数；最后一页恰好整除时会多发一次空请求，无害。</li>
+      <li><strong>PR 过滤</strong>：L183 <code>issue.PullRequest != nil</code> 即跳过；字段类型是 <code>*struct{}</code>（L285，空结构体 0 字节，只判 nil 不解析内容）。</li>
+      <li><strong>错误分流</strong>：404 wrap <code>engine.ErrNonRetryable</code>（L148，永久失败进 DLQ）；403/429 只返回 <code>SourceError</code>（L150，限流可重试走退避）；网络错误普通 error。</li>
+      <li><strong>字段映射</strong>：Body 用 <code>truncate(issue.Body, 500)</code> 截断防爆 JSONB（L201）；Version=<code>issue.UpdatedAt.Unix()</code> 秒级时间戳（L224），同秒更新靠对账 hash 兜底 CONTENT_MISMATCH。</li>
+      <li>外部调用：GET api.github.com/repos/{owner}/{repo}/issues；token 来自环境变量 GITHUB_TOKEN；http.Client 30s 超时；NewRequestWithContext 让 ctx 取消能中断 HTTP。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：GitHub REST API（net/http、encoding/json）、engine.ErrNonRetryable、model.Record ｜ 被调用：factory.go NewSource（source_type=github）</p>
+</section>
+<section class="file-block" id="file-25">
+  <h3 class="file-title">25 · internal/source/postgres/source.go（136 行）— Postgres 表数据源（keyset 分页）</h3>
+  <p class="file-duty">职责：把任意 PG 表当成数据源，用主键 ::text 做 keyset 稳定分页，行 JSON→Record。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">NewSource(ctx, dbURL, syncContent)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ parseContent(syncContent)</span></div>
+    <div class="fc-row"><span class="fc-step">SplitN(":",2) → table；pk 默认 "id"，有冒号则取第二段</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇rule=^[a-zA-Z_][a-zA-Z0-9_]*$ 校验 table / pk</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">不匹配</span><span class="fc-error">返回 ErrNonRetryable「非法表名/主键」</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">通过</span><span class="fc-step">pgxpool.New(ctx,dbURL)</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ pool.Ping(ctx)；失败→pool.Close() 并返回 error</span></div>
+    <div class="fc-row"><span class="fc-end">return &amp;Source{dbURL,table,pk,pool}</span></div>
+    <div class="fc-row"><span class="fc-arrow">▼ Fetch(ctx, cursor, limit)</span></div>
+    <div class="fc-row"><span class="fc-start">Fetch</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ select ctx.Done()? → ctx.Err()；◇limit&lt;=0? → error</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 拼 SQL</span></div>
+    <div class="fc-row"><span class="fc-decide">◇cursor == ""（第一页）?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-step">SELECT row_to_json(t)::text FROM {table} t ORDER BY {pk}::text LIMIT $1</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-step">…WHERE {pk}::text &gt; $1 ORDER BY {pk}::text LIMIT $2（keyset：pk::text &gt; cursor）</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ pool.Query(ctx, query, args)，defer rows.Close()</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ for rows.Next()：Scan(raw string)→json.Unmarshal→rowToRecord(row)</span></div>
+    <div class="fc-row"><span class="fc-step">rowToRecord：ID=%v(row[pk])；Data=mustJSON(row)；◇row["updated_at"]为string?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-step">time.Parse(RFC3339Nano, tsStr) 成功→UpdatedAt=t, Version=t.Unix()</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否/解析失败</span><span class="fc-note">Version=0，对账退化到 hash 比较</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 记录 lastKey=rec.ID；循环后 rows.Err() 检查</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ◇hasMore = len(records) == limit ?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-step">nextCursor=lastKey</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-step">nextCursor=""</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-end">return records, nextCursor, hasMore, nil</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><strong>白名单正则</strong>：<code>rule = ^[a-zA-Z_][a-zA-Z0-9_]*$</code>（L23）校验表名/主键，防 SQL 注入（表名不能参数化，只能正则白名单）。</li>
+      <li><strong>keyset 分页</strong>：L91-95 <code>WHERE {pk}::text &gt; $1 ORDER BY {pk}::text</code>，统一 ::text 比较，兼容 int/TEXT/UUID 任意主键类型；cursor=上一页末条主键值。</li>
+      <li><strong>时间解析</strong>：L145 用 <code>time.Parse(time.RFC3339Nano, tsStr)</code> 而非 RFC3339——PG timestamptz 带微秒，用 RFC3339 必失败导致 Version 恒 0。</li>
+      <li>NewSource 失败要 pool.Close() 防泄漏（L52-54）；Close() 关闭连接池，否则每次同步泄漏一个池。</li>
+      <li>外部 SQL：<code>SELECT row_to_json(t)::text FROM 表 t … ORDER BY 主键::text LIMIT</code>；args 用 $1/$2 占位符防注入。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：pgx/v5/pgxpool、engine.ErrNonRetryable、model.Record ｜ 被调用：factory.go NewSource（source_type=postgres）</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 7 层 ==================== -->
+<section class="layer-section" id="layer-7">
+  <div class="layer-header">
+    <span>第 7 层 · 协调组件（Redis / MQ / 锁 / 熔断）</span>
+    <span class="layer-meta">9 个文件 · 651 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-26">
+  <h3 class="file-title">26 · internal/redisclient/client.go（42 行）— Redis 客户端封装</h3>
+  <p class="file-duty">职责：只负责创建/验证/关闭 go-redis 连接，对外暴露底层 *redis.Client，业务模块（锁/熔断/限流）从它取连接。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">NewClient(ctx, addr, password)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ redis.NewClient(&amp;Options{Addr,Password,DB:0})（不真正连）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ client.Ping(ctx)</span></div>
+    <div class="fc-row"><span class="fc-decide">◇Ping 失败?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-error">client.Close() 释放资源 → 返回「Ping redis error」</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-step">log「redis connected」→ 返回 &amp;Client{client}</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">▼ Client() 方法：返回底层 *redis.Client</span></div>
+    <div class="fc-row"><span class="fc-arrow">▼ Close()：client != nil ? client.Close() : nil</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>redis.NewClient</code> 只构造对象不建连（L31）；真正建连在 <code>Ping</code>（L36），网络不通/密码错在此暴露。</li>
+      <li>Ping 失败先 <code>client.Close()</code> 再返回 error，避免连接泄漏（L37）。</li>
+      <li>DB 固定 0；通过 <code>Client()</code> 方法而非直接暴露字段访问底层实例（L49）。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：github.com/redis/go-redis/v9 ｜ 被调用：lock、circuitbreaker 等模块拿 *redis.Client</p>
+</section>
+<section class="file-block" id="file-27">
+  <h3 class="file-title">27 · internal/mq/connection.go（122 行）— RabbitMQ 连接与交换机/队列拓扑声明</h3>
+  <p class="file-duty">职责：建立 TCP 连接+Channel，并幂等声明完整消息拓扑：主交换机→主队列(配DLX)→延迟重试队列(TTL回流)→DLQ。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="iface-box">常量：ExchangeName=syncguard.jobs / QueueName=syncguard.jobs.queue / DLXName=syncguard.jobs.dlx / DLQName=syncguard.jobs.dlq / RetryQueueName=syncguard.jobs.retry / RoutingKey=job.run</span></div>
+    <div class="fc-row"><span class="fc-start">Connect(url)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ amqp.Dial(url) 建 TCP；失败→error「RabbitMQ 连接失败」</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ conn.Channel()；失败→conn.Close() 后返回</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ declareTopology(ch)；失败→ch.Close()+conn.Close() 后返回</span></div>
+    <div class="fc-row"><span class="fc-step">① ExchangeDeclare(DLXName, direct, durable)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ② QueueDeclare(DLQName, durable)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ③ QueueBind(DLQName, RoutingKey, DLXName)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ④ ExchangeDeclare(ExchangeName=主交换机, direct, durable)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ⑤ QueueDeclare(QueueName, durable, args={x-dead-letter-exchange:DLXName})</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ⑥ QueueBind(QueueName, RoutingKey, ExchangeName)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ⑦ QueueDeclare(RetryQueueName, durable, args={x-dead-letter-exchange:主交换机, x-dead-letter-routing-key:job.run})</span></div>
+    <div class="fc-row"><span class="fc-end">返回 conn, ch（调用方退出时 ch.Close()/conn.Close()）</span></div>
+  </div>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-branch-label">消息流向拓扑图</span></div>
+    <div class="fc-row"><span class="fc-step">Producer</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ Publish(routingKey=job.run)</span></div>
+    <div class="fc-row"><span class="struct-box">主交换机 syncguard.jobs (direct)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ binding job.run</span></div>
+    <div class="fc-row"><span class="struct-box">主队列 syncguard.jobs.queue（durable，x-dead-letter-exchange=DLX）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 正常投递 → Worker</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">处理失败 Nack(requeue=false)</span><span class="fc-error">→ 死信 DLX syncguard.jobs.dlx → DLQ syncguard.jobs.dlq（放弃/人工处理）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">抢锁失败 → PublishDelayed 带 TTL</span><span class="fc-step">→ 延迟队列 syncguard.jobs.retry（x-dead-letter-exchange=主交换机）</span><span class="fc-arrow">↓ 消息 TTL 到期成死信</span><span class="fc-step">回流主交换机 → 主队列重试</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-note">关键点：延迟队列的 DLX 指向「主交换机」而非死信 DLX，所以 TTL 到期是回流主队列，不是进 DLQ。</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>declareTopology</code>（L34）按 7 步声明：先 DLX→DLQ→绑定，再主交换机→主队列(配DLX)→绑定，最后延迟重试队列。</li>
+      <li><strong>主队列</strong> args <code>x-dead-letter-exchange=DLXName</code>（L85-87）：Worker 处理失败 Nack(requeue=false) 的消息进 DLX→DLQ。</li>
+      <li><strong>延迟重试队列</strong> args <code>x-dead-letter-exchange=ExchangeName + x-dead-letter-routing-key=job.run</code>（L112-115）：消息带 Expiration(TTL) 进此队列，到期成死信被转发回主交换机→主队列，实现「抢锁失败延迟重试」。</li>
+      <li>所有 Exchange/Queue 均 durable；Declare 幂等，改参数需先删旧队列否则 PRECONDITION_FAILED。</li>
+      <li>Connect 任一步失败都 Close 已建资源防泄漏（Channel 失败关 conn，拓扑失败关 ch+conn）。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：rabbitmq/amqp091-go（Dial/Channel/ExchangeDeclare/QueueDeclare/QueueBind）｜ 被调用：main/启动流程初始化 MQ，返回 conn+ch 给 Producer/Consumer</p>
+</section>
+<section class="file-block" id="file-28">
+  <h3 class="file-title">28 · internal/mq/message.go（28 行）— MQ 消息结构体定义</h3>
+  <p class="file-duty">职责：定义发布到 RabbitMQ 的 JobMessage 和 outbox 表的 OutboxPayload，提供 JSON 序列化函数。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">JobMessage（发到 RabbitMQ 的 JSON）<br>
+      job_id:int ｜ task_name:string ｜ timestamp:time.Time（Producer 创建时刻）<br>
+      connection_id:int ｜ attempt:int（第几次投递，0=首次，退避用）</span></div>
+    <div class="fc-row"><span class="fc-arrow">▼</span></div>
+    <div class="fc-row"><span class="struct-box">OutboxPayload（outbox 表 payload）<br>
+      job_id:int ｜ task_name:string ｜ connection_id:int ｜ attempt:int<br>
+      delay_ms:int64（=0 立即发，&gt;0 延迟发送，搬运工据此选发送路径）</span></div>
+    <div class="fc-row"><span class="fc-arrow">▼ MarshalOutboxPayload(jobID,taskName,connectionID,attempt,delayMs)</span></div>
+    <div class="fc-row"><span class="fc-step">组装 OutboxPayload → json.Marshal → []byte</span></div>
+    <div class="fc-row"><span class="fc-end">返回 payload 字节（供双写点 RunJob/重投写 outbox 表）</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>JobMessage.Attempt</code>（L14）记录投递次数，阶段4 指数退避据此计算延迟。</li>
+      <li><code>OutboxPayload.DelayMs</code>（L24）区分立即发送与延迟发送，由 outbox 搬运工决定走 Publish 还是 PublishDelayed。</li>
+      <li><code>MarshalOutboxPayload</code>（L29）是唯一行为函数，纯 json.Marshal，无错误分支以外的逻辑。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：encoding/json、time ｜ 被调用：producer.go（组 JobMessage）、outbox 双写点（写 OutboxPayload）</p>
+</section>
+<section class="file-block" id="file-29">
+  <h3 class="file-title">29 · internal/mq/producer.go（84 行）— 消息生产者（普通发布 + 延迟发布 confirm）</h3>
+  <p class="file-duty">职责：把任务序列化成 JSON 发到交换机；延迟发布走 publisher confirm 同步等待 Broker 确认。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">Producer{channel, exchange, routingKey}</span></div>
+    <div class="fc-row"><span class="fc-start">Publish(ctx, jobID, taskName, connectionID, attempt)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 组装 JobMessage{Timestamp=time.Now(), Attempt}</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ json.Marshal → 失败返回「序列化失败」</span></div>
+    <div class="fc-row"><span class="fc-step">amqp.Publishing{ContentType:application/json, DeliveryMode:Persistent, Body}</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ channel.PublishWithContext(ctx, exchange, routingKey, mandatory=false, immediate=false, pub)</span></div>
+    <div class="fc-row"><span class="fc-end">log 已发布 → return nil</span></div>
+    <div class="fc-row"><span class="fc-arrow">▼ PublishDelayed(ctx, jobID, taskName, connectionID, attempt, delay)</span></div>
+    <div class="fc-row"><span class="fc-start">PublishDelayed</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 组装 JobMessage → json.Marshal</span></div>
+    <div class="fc-row"><span class="fc-step">amqp.Publishing{…, Expiration=strconv.FormatInt(delay.Milliseconds()), Body}（消息级 TTL）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ PublishWithDeferredConfirmWithContext(ctx, "", RetryQueueName, …)（默认交换机直发延迟队列）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 得到 deferred confirm 句柄</span></div>
+    <div class="fc-row"><span class="fc-step">deferred.WaitContext(ctx) 同步阻塞等 Broker basic.ack/nack</span></div>
+    <div class="fc-row"><span class="fc-decide">◇err != nil（超时未等到）|| !acked（被 nack）?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-error">返回「延迟消息未被 RabbitMQ 确认」（不 Ack 原消息，防丢）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-step">Broker 已确认接收 → log → return nil（调用方才安全 Ack 原消息）</span></span>
+    </span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><strong>Publish</strong>（L32）：DeliveryMode=Persistent 消息持久化，配合 durable 队列提高重启存活率；mandatory/immediate 固定 false。</li>
+      <li><strong>PublishDelayed</strong>（L75）：消息带 <code>Expiration</code>（毫秒 TTL）发到默认交换机 "" + routingKey=RetryQueueName，直发延迟队列；到期被队列 DLX 转回主交换机。</li>
+      <li><strong>Publisher Confirm 同步等待</strong>（L96-107）：<code>PublishWithDeferredConfirmWithContext</code> 后必须 <code>deferred.WaitContext(ctx)</code> 等 Broker ack；只有拿到 ack 才返回 nil，调用方据此安全 Ack 原消息，避免丢消息。前提：Channel 须先 Confirm(false)。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：amqp091-go（PublishWithContext/PublishWithDeferredConfirmWithContext/WaitContext）、mq 包常量 RetryQueueName、time/strconv ｜ 被调用：Worker 抢锁失败时调 PublishDelayed；调度入口调 Publish</p>
+</section>
+<section class="file-block" id="file-30">
+  <h3 class="file-title">30 · internal/mq/consumer.go（33 行）— 消息消费者（QoS + 订阅）</h3>
+  <p class="file-duty">职责：设置 prefetch=1 限流、订阅主队列，把 Delivery 交给 Worker，本身不处理业务。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">NewConsumer(ch, queue)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ ch.Qos(prefetchCount=1, 0, false)</span></div>
+    <div class="fc-row"><span class="fc-decide">◇Qos 失败?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-error">返回「设置 Qos 失败」</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">否</span><span class="fc-step">返回 &amp;Consumer{channel, queue}</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">▼ Consume()</span></div>
+    <div class="fc-row"><span class="fc-step">ch.Consume(queue, consumerTag=""(自动), autoAck=false, exclusive=false, noLocal=false, noWait=false, nil)</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-end">返回 &lt;-chan amqp.Delivery（Worker for range 消费；Channel 关闭则 channel 关闭）</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>ch.Qos(1,0,false)</code>（L21）prefetch=1：最多 1 条 unacked，当前消息 Ack/Nack 后才投下一条，适合单 Worker 串行长任务，代价是吞吐低。</li>
+      <li><code>Consume</code>（L34）autoAck=false：关闭自动确认，由 Worker 手动 Ack/Nack；exclusive=false 允许多 Consumer 共同消费。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：amqp091-go（Qos/Consume）｜ 被调用：Worker 启动时 NewConsumer+Consume 拉消息流</p>
+</section>
+<section class="file-block" id="file-31">
+  <h3 class="file-title">31 · internal/mq/backoff.go（25 行）— 指数退避计算</h3>
+  <p class="file-duty">职责：根据投递次数计算重试延迟，指数增长+封顶+随机抖动，避免重试风暴。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="iface-box">常量：backoffBase=5s ｜ backoffMax=2min（120s）｜ MaxAttempts=5（attempt 从 0 计，达 5 不再退避直接进 DLQ）</span></div>
+    <div class="fc-row"><span class="fc-start">BackoffDelay(attempt)</span></div>
+    <div class="fc-row"><span class="fc-step">d = backoffBase = 5s</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ for i:=0; i&lt;attempt &amp;&amp; d&lt;backoffMax; i++</span></div>
+    <div class="fc-row"><span class="fc-step">d *= 2（5s→10s→20s→40s→80s→120s封顶）</span></div>
+    <div class="fc-row"><span class="fc-arrow">◇d &gt; backoffMax? → d = backoffMax（封顶 2min）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓</span></div>
+    <div class="fc-row"><span class="fc-step">jitter = rand.Int63n(d/2)（[0, d/2) 随机抖动）</span></div>
+    <div class="fc-row"><span class="fc-end">return d + jitter</span></div>
+    <div class="fc-row"><span class="fc-note">序列：attempt0=5s+[0,2.5s)；1=10s；2=20s；3=40s；4=80s；&gt;=5 达 MaxAttempts → DLQ 不再退避</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>公式 <code>5s × 2^attempt</code>（L28-35），循环内每乘 2 次即检查封顶 backoffMax=2min。</li>
+      <li><strong>随机抖动</strong> <code>rand.Int63n(d/2)</code>（L36）：把同批失败任务的重试时间随机错开，避免同时重试形成重试风暴。</li>
+      <li><strong>MaxAttempts=5</strong>（L17）：attempt 从 0（首次）计，达 5 次后不再退避重投，直接进 DLQ 放弃。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：math/rand、time ｜ 被调用：Worker 失败重投逻辑据 BackoffDelay(attempt) 决定 PublishDelayed 的 delay</p>
+</section>
+<section class="file-block" id="file-32">
+  <h3 class="file-title">32 · internal/lock/connection_lock.go（124 行）— Redis 连接级分布式锁</h3>
+  <p class="file-duty">职责：用 Redis SET NX EX 租约锁协调多 Worker 同步同一数据源；credential={jobID}:{随机token}，Renew/Unlock 用 Lua 原子校验凭证。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="struct-box">ConnectionLock{client}；key=lock:connection:{id}；credential="{jobID}:{32位hex token}"</span></div>
+    <div class="fc-row"><span class="fc-branch-label">① Lock(ctx, connectionID, jobID, lease) 抢锁</span></div>
+    <div class="fc-row"><span class="fc-start">Lock</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ newToken()：crypto/rand 16 字节→hex 32 位</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ credential = "{jobID}:{token}"</span></div>
+    <div class="fc-row"><span class="fc-step">Redis: SET lock:connection:{id} {credential} NX EX {lease}</span></div>
+    <div class="fc-row"><span class="fc-decide">◇ok = SetNX 结果?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">false（已被占）</span><span class="fc-end">return "", acquired=false, nil</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">true（抢到）</span><span class="fc-end">return credential, acquired=true, nil</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-branch-label">② Owner(ctx, connectionID) 读持锁者 jobID</span></div>
+    <div class="fc-row"><span class="fc-start">Owner</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ GET lock:connection:{id}</span></div>
+    <div class="fc-row"><span class="fc-decide">◇err == redis.Nil?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是（key 不存在）</span><span class="fc-end">return 0, found=false, nil（锁刚过期/释放）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">其他 err</span><span class="fc-error">return err（保守处理，如进 DLQ）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">成功</span><span class="fc-step">parseCredentialJobID：strings.Index(":")→Atoi 前缀 jobID</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-end">return jobID, found=true, nil</span></div>
+    <div class="fc-row"><span class="fc-branch-label">③ Renew(ctx, connectionID, credential, lease) 续约（Lua 原子）</span></div>
+    <div class="fc-row"><span class="fc-start">Renew</span></div>
+    <div class="fc-row"><span class="fc-step">renewScript.Run(key, ARGV=credential, lease.Milliseconds())</span></div>
+    <div class="fc-row"><span class="fc-note">Lua: if GET(key)==ARGV[1] then PEXPIRE(key,ARGV[2]) else 0 end —— 读→判→续 原子</span></div>
+    <div class="fc-row"><span class="fc-decide">◇result == 1?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">1</span><span class="fc-end">续约成功 return true</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">0（凭证不符）</span><span class="fc-end">return false（锁已易主，别续了）</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-branch-label">④ Unlock(ctx, connectionID, credential) 释放（Lua 原子）</span></div>
+    <div class="fc-row"><span class="fc-start">Unlock</span></div>
+    <div class="fc-row"><span class="fc-step">unlockScript.Run(key, ARGV=credential)</span></div>
+    <div class="fc-row"><span class="fc-note">Lua: if GET(key)==ARGV[1] then DEL(key) else 0 end —— 读→判→删 原子，防删错别人的锁</span></div>
+    <div class="fc-row"><span class="fc-end">return nil（脚本执行成功即返回，不关心 0/1）</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><strong>抢锁</strong>（L51）：value = <code>"{jobID}:{随机token}"</code>，Redis 命令 <code>SET key credential NX EX lease</code>；token 用 crypto/rand 16 字节→hex（L142 newToken），保证旧任务凭证删不掉新锁。</li>
+      <li><strong>Owner()</strong>（L81）：GET 锁值后 <code>parseCredentialJobID</code> 取冒号前缀 jobID，区分三种返回：err→Redis故障保守处理；found=false→锁不存在（竞态）；found=true→谁在持锁。Worker 据此判断「重复投递还是新触发」。</li>
+      <li><strong>Renew</strong>（L98）：<code>renewScript</code> Lua（L119）原子执行 <code>GET==ARGV then PEXPIRE</code>，单位用毫秒（PEXPIRE），result==1 才算续约成功。</li>
+      <li><strong>Unlock</strong>（L109）：<code>unlockScript</code> Lua（L128）原子 <code>GET==ARGV then DEL</code>，只有锁还是自己的才删。</li>
+      <li>外部命令：SET NX EX、GET、PEXPIRE、DEL；Lua 脚本保证「读→判断→动作」不可分割。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：go-redis/v9（SetNX/Get/Script.Run）、crypto/rand/hex/strconv ｜ 被调用：Worker 执行同步前 Lock、执行中心跳 Renew、结束 Unlock，抢锁失败时 Owner 判重投/新触发</p>
+</section>
+<section class="file-block" id="file-33">
+  <h3 class="file-title">33 · internal/circuitbreaker/circuit_breaker.go（148 行）— Redis 三态熔断器</h3>
+  <p class="file-duty">职责：closed/open/half_open 三态状态机，状态存 Redis hash 跨 Worker 共享，Lua 原子操作；open 到期只放一个探针试探。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="iface-box">DefaultConfig: MaxFailures=5 ｜ OpenTimeout=60s ｜ ProbeTTL=35s（故意&gt;30s HTTP超时）<br>
+      Redis keys: hash=breaker:connection:{id}(state/failures/open_until) ｜ probe=…:probe（SET NX + TTL 令牌）</span></div>
+    <div class="fc-row"><span class="fc-branch-label">状态机流转</span></div>
+    <div class="fc-row"><span class="fc-step">closed（正常放行，累计失败）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 连续失败达 maxFailures=5</span></div>
+    <div class="fc-row"><span class="fc-error">open（快速失败，不真调数据源；open_until=now+60s）</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ 冷却到期 now &gt;= open_until，某 Worker 抢到探针令牌 SET NX PX 35s</span></div>
+    <div class="fc-row"><span class="fc-decide">◇half_open（只放行 1 个探针）</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">探针成功</span><span class="fc-step">RecordSuccess → 清 probe + state=closed failures=0 → closed</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">探针失败</span><span class="fc-error">RecordFailure → 清 probe + state=open 刷新 open_until → open</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-branch-label">Allow(ctx) 是否放行</span></div>
+    <div class="fc-row"><span class="fc-start">Allow</span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ newProbeToken() 生成 32 位 hex 令牌（即使 closed 也先生成）</span></div>
+    <div class="fc-row"><span class="fc-step">allowScript.Run(hashKey, probeKey, token, probeTTL.ms, now.ms)</span></div>
+    <div class="fc-row"><span class="fc-note">Lua 分支：open&amp;now&lt;open_until→{0,""}；open 到期→SET probe NX PX，成功则 state=half_open 返回{1,token}；half_open&amp;probe不存在→抢 NX，抢到{1,token}否则{0,""}；closed→{1,""}</span></div>
+    <div class="fc-row"><span class="fc-end">return allowed, probeToken</span></div>
+    <div class="fc-row"><span class="fc-branch-label">RecordSuccess(ctx, probeToken)</span></div>
+    <div class="fc-row"><span class="fc-start">RecordSuccess</span></div>
+    <div class="fc-row"><span class="fc-step">recordSuccessScript.Run(hashKey, probeKey, probeToken)</span></div>
+    <div class="fc-row"><span class="fc-note">Lua: token非空则校验 GET(probe)==token，不符返回0；相符则 DEL(probe)；然后 HSET state=closed failures=0，HDEL open_until</span></div>
+    <div class="fc-row"><span class="fc-end">return nil</span></div>
+    <div class="fc-row"><span class="fc-branch-label">RecordFailure(ctx, probeToken)</span></div>
+    <div class="fc-row"><span class="fc-start">RecordFailure</span></div>
+    <div class="fc-row"><span class="fc-step">recordFailureScript.Run(hashKey, probeKey, probeToken, now.ms, openTimeout.ms, maxFailures)</span></div>
+    <div class="fc-row"><span class="fc-note">Lua: token非空(探针失败)→校验令牌后 DEL(probe)+HSET state=open,open_until=now+timeout；普通失败→HINCRBY failures+1，达阈值才 HSET state=open</span></div>
+    <div class="fc-row"><span class="fc-end">return nil</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><strong>三态机</strong>：closed 正常放行；open 快速失败；half_open 只放一个探针。状态全存 Redis hash <code>breaker:connection:{id}</code>（state/failures/open_until），多 Worker 实例共享。</li>
+      <li><strong>探针令牌</strong>：open 到期后用 <code>SET probe NX PX {probeTTL}</code>（L127 allowScript）抢唯一试探名额；ProbeTTL=35s 故意 &gt; HTTP 30s 超时，保证探针请求能在令牌过期前完成上报。</li>
+      <li><strong>Allow</strong>（L75）：先生成 token 再跑 allowScript；closed 也生成 token 是为了 open→half_open 抢占时复用。返回 {allowed, probeToken} 二元组。</li>
+      <li><strong>RecordSuccess</strong>（L97）：探针 token 非空先校验 GET(probe)==token 防旧探针污染，通过后 DEL(probe) 并 HSET closed/failures=0/HDEL open_until。</li>
+      <li><strong>RecordFailure</strong>（L108）：探针失败直接 open 刷新 open_until；普通失败 HINCRBY 累计，达 maxFailures=5 才 open。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：go-redis/v9（Script.Run/HGET/HSET/HINCRBY/HDEL/SET NX PX/GET/DEL/EXISTS）、crypto/rand ｜ 被调用：circuitbreaker/source.go 的 breakerSource 装饰器在 Fetch 前后调用</p>
+</section>
+<section class="file-block" id="file-34">
+  <h3 class="file-title">34 · internal/circuitbreaker/source.go（45 行）— 熔断器装饰器（breakerSource）</h3>
+  <p class="file-duty">职责：装饰 engine.Source，Fetch 前先 Allow 放行判断，结果上报熔断器；对 Engine 透明。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="iface-box">breakerSource{inner engine.Source, breaker *CircuitBreaker} ｜ var ErrCircuitOpen = errors.New("熔断器打开")</span></div>
+    <div class="fc-row"><span class="fc-start">Wrap(src, breaker) → 返回 &amp;breakerSource{inner, breaker}</span></div>
+    <div class="fc-row"><span class="fc-arrow">▼ Fetch(ctx, cursor, limit)</span></div>
+    <div class="fc-row"><span class="fc-step">breaker.Allow(ctx) → allowed, probeToken</span></div>
+    <div class="fc-row"><span class="fc-decide">◇err != nil?（脚本故障）</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">是</span><span class="fc-error">返回「熔断器 Allow」error</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">◇!allowed（熔断中）</span><span class="fc-error">快速失败：返回 ErrCircuitOpen（不真调数据源）</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">↓ allowed=true</span></div>
+    <div class="fc-row"><span class="fc-step">inner.Fetch(ctx, cursor, limit) 真正调底层 Source</span></div>
+    <div class="fc-row"><span class="fc-decide">◇err != nil?</span></div>
+    <div class="fc-row"><span class="fc-branches">
+      <span class="fc-branch"><span class="fc-branch-label">errors.Is(err, context.Canceled) || errors.Is(err, engine.ErrNonRetryable)</span><span class="fc-note">主动取消/永久错误 → 不计熔断失败，直接 return err（不改状态）</span></span>
+      <span class="fc-branch"><span class="fc-branch-label">其他依赖失败</span><span class="fc-step">breaker.RecordFailure(ctx, probeToken) → return err</span></span>
+    </span></div>
+    <div class="fc-row"><span class="fc-arrow">◇err == nil（成功）</span></div>
+    <div class="fc-row"><span class="fc-step">breaker.RecordSuccess(ctx, probeToken)</span></div>
+    <div class="fc-row"><span class="fc-end">return records, nextCursor, hasMore, nil</span></div>
+    <div class="fc-row"><span class="fc-note">Close()：透传 inner.Close()（释放底层 PG 连接池等）</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><strong>快速失败</strong>（L45-48）：<code>Allow</code> 返回 allowed=false 时直接返回 <code>ErrCircuitOpen</code>，不调用 inner.Fetch，Worker 据此走延迟重试/DLQ。</li>
+      <li><strong>失败不计入熔断</strong>（L53）：<code>errors.Is(err, context.Canceled)</code>（任务取消/丢租约）和 <code>errors.Is(err, engine.ErrNonRetryable)</code>（如 404 仓库不存在）直接返回，不调 RecordFailure——避免主动取消/永久错误污染熔断计数。</li>
+      <li>其余错误（超时/网络/5xx/限流）才 <code>RecordFailure</code>；成功一律 <code>RecordSuccess</code>（吞掉上报错误，_ =）。</li>
+      <li>装饰器自身实现 engine.Source，Engine 完全无感知；Close 透传到底层。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：CircuitBreaker.Allow/RecordSuccess/RecordFailure、engine.Source/ErrNonRetryable、errors.Is ｜ 被调用：factory/组装 Source 时用 Wrap 包一层再交给 Engine</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 8 层 ==================== -->
+<section class="layer-section" id="layer-8">
+  <div class="layer-header">
+    <span>第 8 层 · Worker 编排（闭环）</span>
+    <span class="layer-meta">2 个文件 · 387 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-35">
+  <h3 class="file-title">35 · internal/worker/dispatcher.go（99 行）— Outbox 消息搬运工定时扫描投递</h3>
+  <p class="file-duty">职责：定时扫描 outbox 表中未发送的消息，按延迟分流发到 RabbitMQ，成功才标记已发，失败留到下轮重试（at-least-once）。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Start(ctx)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">time.NewTicker(2s)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-decide">select：ctx.Done() 还是 ticker.C？</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">ctx.Done()</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">log「已停止」return</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">ticker.C 每 2s</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">processOnce(ctx)</span>
+        <span class="fc-arrow">↓ 出错仅 log，不退出循环</span>
+        <span class="fc-note">下一轮 ticker 继续</span>
+      </div>
+    </div>
+    <div class="fc-arrow">↓ processOnce 内部</div>
+    <div class="fc-row"><span class="fc-step">store.ListUnsent(ctx, 20)</span></div>
+    <div class="fc-arrow">↓ err → return error（外层 log）</div>
+    <div class="fc-row"><span class="fc-decide">for 每条 msg：json.Unmarshal(msg.Payload) → mq.OutboxPayload</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">解析失败</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">log 解析失败，continue（等人工）</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">解析成功</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide">p.DelayMs == 0 ?</span>
+        <span class="fc-arrow">↓</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">DelayMs==0 立即发</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">producer.Publish(JobID, TaskName, ConnectionID, Attempt)</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">DelayMs&gt;0 延迟发</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">producer.PublishDelayed(..., DelayMs*ms)</span>
+          </div>
+        </div>
+        <span class="fc-arrow">↓ sendErr ?</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">发送失败</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-error">log，continue（不标 sent，下轮重发）</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">发送成功</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">store.MarkSent(msg.ID)</span>
+            <span class="fc-arrow">↓ MarkSent 失败</span>
+            <span class="fc-note">log，continue；消息已发但未标，下轮重发靠幂等兜底</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-row"><span class="fc-end">return nil（本轮结束）</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>Start</code>（L39-53）用 2s ticker 驱动，ctx 取消时 defer ticker.Stop 并 return；processOnce 出错只 log，循环不中断。</li>
+      <li><code>processOnce</code>（L63-98）一次最多取 20 条（<code>ListUnsent(ctx, 20)</code>），逐条处理；发送成功后才 <code>MarkSent</code>，失败绝不标记——未标消息下轮自然重投。</li>
+      <li>延迟分流：<code>DelayMs==0</code> 走 <code>Publish</code> 主队列，<code>&gt;0</code> 走 <code>PublishDelayed</code>（L77-83），把延迟重投的控制权交给 MQ。</li>
+      <li>解析失败的消息（L71-74）直接 continue 不 MarkSent，等待人工处理，避免坏消息无限重投。</li>
+      <li><code>outboxPublisher</code> / <code>outboxStore</code> 被定义成只有 2 个方法的最小接口（L16-25），<code>*mq.Producer</code> 与 <code>*repository.OutboxStore</code> 天然满足，单测可注入 fake，不依赖真实 RabbitMQ——这是可测性设计。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：time.Ticker、encoding/json、mq.OutboxPayload/Publish/PublishDelayed、repository.OutboxStore.ListUnsent/MarkSent ｜ 被调用：main 装配层 NewDispatcher(...).Start(ctx) 启动后台搬运协程</p>
+</section>
+<section class="file-block" id="file-36">
+  <h3 class="file-title">36 · internal/worker/worker.go（346 行）— 消费消息、抢锁、执行同步的核心 Worker</h3>
+  <p class="file-duty">职责：处理单条 RabbitMQ 消息的完整生命周期——幂等跳过、抢分布式锁、心跳续约、跑同步引擎、释放锁、按失败类型分流重投或进 DLQ。</p>
+
+  <h4 style="margin:10px 0 4px;color:#333;">子图 a：Handle 主流程（抢锁前）</h4>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Handle(msg amqp.Delivery)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">json.Unmarshal(msg.Body) → mq.JobMessage</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">解析失败</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">log，msg.Nack(false,false) 进 DLQ</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">成功</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">jobStore.GetByID(jobMsg.JobID)</span>
+        <span class="fc-arrow">↓ err → Nack(false,false)</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide">job.Status == Completed ？</span>
+        <span class="fc-arrow">↓</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">已完成（幂等）</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-end">log「已执行跳过」，msg.Ack(false) return</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">未完成</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">connLock.Lock(connectionID, jobID, lease=30s) → credential, acquired</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-decide">Lock 返回 err / acquired / !acquired ?</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">子图 a-续：抢锁失败分流</h4>
+  <div class="fc">
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">Lock err（Redis 异常）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">log，msg.Nack(false,false) 进 DLQ</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">!acquired → 查 connLock.Owner(connectionID)</span>
+        <span class="fc-arrow">↓ Owner err → Nack DLQ</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide">found &amp;&amp; owner == jobID ?</span>
+        <span class="fc-arrow">↓</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">同一 job 重复投递</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-end">log，msg.Ack(false) 合并掉 return</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">新触发（被占用）</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">mq.MarshalOutboxPayload(..., lease.Milliseconds())</span>
+            <span class="fc-arrow">↓ Begin tx</span>
+            <span class="fc-step" style="border-style:dashed;">事务：UpdateStatusInTx(pending) + outbox.Insert(tx,payload)</span>
+            <span class="fc-arrow">↓ Commit（任一步失败 → Nack）</span>
+            <span class="fc-end">log，msg.Ack(false) return（延迟重投已落 outbox）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">子图 a-续：抢到锁 → 心跳 + 执行</h4>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">acquired == true</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">taskCtx,cancelTask := WithCancel()（defer cancelTask）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">hbCtx,cancelHb := WithCancel()；leaseLost atomic.Bool；renewDone chan</span></div>
+    <div class="fc-arrow">↓ 启动心跳 goroutine</div>
+    <div class="fc-row"><span class="fc-step" style="border-style:dashed;">go func：ticker(renewInterval=10s) → connLock.Renew(connectionID, credential, lease)</span></div>
+    <div class="fc-row"><span class="fc-note">hbCtx.Done() → 正常退出；Renew 失败且 hbCtx 未取消 → leaseLost.Store(true) + cancelTask()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">runErr := h.runSync(taskCtx, jobMsg)（见子图 b）</span></div>
+    <div class="fc-arrow">↓ 执行返回</div>
+    <div class="fc-row"><span class="fc-step">cancelHb() → &lt;-renewDone（等心跳退出）→ h.unlock(connectionID, credential)</span></div>
+    <div class="fc-arrow">↓ unlock：独立 3s 超时 ctx，失败仅 log，靠 TTL 兜底</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">最终结果判定</div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">子图 a-续：结果判定与失败分流</h4>
+  <div class="fc">
+    <div class="fc-decide" style="text-align:center;">leaseLost.Load() ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">true（租约丢失）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">log 租约丢失，Nack(false,false) 进 DLQ（可能已被别的 Worker 接管）</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">false</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide">runErr != nil ?</span>
+        <span class="fc-arrow">↓</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">errors.Is(runErr, ErrCircuitOpen)</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">GetByID 取最新进度；delay=OpenTimeout(60s)</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step" style="border-style:dashed;">事务：MarshalOutboxPayload(attempt+1,60s) → UpdateStatusInTx(pending) + outbox.Insert → Commit</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-end">log「熔断冷却后重试」，msg.Ack(false)</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">ErrNonRetryable（永久错误）</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-error">log 永久失败，Nack(false,false) 进 DLQ</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">Attempt &gt;= MaxAttempts</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-error">log 重试超限，Nack(false,false) 进 DLQ</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">其他可重试错误</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">delay=mq.BackoffDelay(attempt)；GetByID 取最新进度</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step" style="border-style:dashed;">事务：MarshalOutboxPayload(attempt+1,退避ms) → UpdateStatusInTx(pending) + outbox.Insert → Commit</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-end">log 第 N 次失败退避重试，msg.Ack(false)</span>
+          </div>
+        </div>
+        <span class="fc-arrow">↓ runErr == nil</span>
+        <span class="fc-end">log「执行完成」，msg.Ack(false)</span>
+      </div>
+    </div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">子图 b：runSync 装配</h4>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">runSync(ctx, jobMsg)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">NewConnectionStore / NewSyncedStore / NewJobStore</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">jobStore.GetByID(jobMsg.JobID)（取 SyncContent、TargetConnectionID、UserID）</span></div>
+    <div class="fc-arrow">↓ err → return err</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">src = source.NewSource(ctx, db, connectionStore, ConnectionID, SyncContent)</span></div>
+    <div class="fc-arrow">↓ err → return err</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">breaker = circuitbreaker.New(rdb, ConnectionID, DefaultConfig)（per-connection，状态存 Redis 跨 Worker 共享）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">src = circuitbreaker.Wrap(src, breaker)；defer src.Close()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">job.TargetConnectionID == nil 或 == 0 ？</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">是 → 内部存储</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">dst = repository.NewInternalDest(syncedStore, UserID, ConnectionID)</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">否 → 外部目标</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">dst = destination.NewDestination(ctx, connectionStore, *TargetConnectionID, SyncContent)</span>
+        <span class="fc-arrow">↓ err → return err</span>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">dst = repository.NewJobDestination(dst, jobStore, JobID)（包进度上报）；defer dst.Close()</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">eng = engine.New(src, dst, batchSize=200)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">return eng.Run(ctx, jobMsg.TaskName)</span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><b>幂等</b>（L73-77）：查到 job 已是 <code>JobStatusCompleted</code> 直接 Ack 跳过，避免重复执行造成重复写。</li>
+      <li><b>抢锁失败三分流</b>（L80-138）：Redis 异常 → DLQ；<code>Owner==jobID</code> 重复投递 → Ack 合并；新触发 → 事务里记 pending + 写 outbox 延迟重投再 Ack。</li>
+      <li><b>taskCtx / hbCtx 分离</b>（L144-171）：taskCtx 传给引擎，Renew 失败时 cancelTask 真正中断任务；hbCtx 只控心跳，正常收尾 cancelHb 不会被误判成丢租约。renewInterval=lease/3=10s，lease=30s。</li>
+      <li><b>所有重投路径都走同一事务模式</b>：<code>Begin → UpdateStatusInTx(pending, TotalCount, Cursor) → outbox.Insert(tx,payload) → Commit</code>，保证「记进度」和「记待发消息」同生共死，消息不丢。熔断冷却 60s、指数退避（BackoffDelay）、新触发延迟重投三处复用此模式。</li>
+      <li><b>结果判定优先级</b>（L182-290）：先看 leaseLost → 再区分 ErrCircuitOpen（冷却重投）/ ErrNonRetryable（DLQ）/ Attempt≥MaxAttempts（DLQ）/ 其他可重试（指数退避重投）。</li>
+      <li><b>unlock</b>（L339-345）用独立 3s 超时短 ctx，不复用已 cancel 的业务 ctx；失败只 log，锁靠 TTL 自动过期兜底。</li>
+      <li><b>runSync</b>（L297-335）：源工厂 + 熔断包装（per-connectionID，Redis 共享状态）+ 目标接线（nil→内部存储 / 否则外部工厂）+ job_destination 包进度 + engine.New(src,dst,200).Run。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：repository.JobStore/ConnectionStore/SyncedStore/OutboxStore/DB、lock.ConnectionLock、redisclient、source.NewSource、destination.NewDestination、circuitbreaker、engine、mq.MarshalOutboxPayload/BackoffDelay/MaxAttempts、model ｜ 被调用：MQ 消费循环对每条 amqp.Delivery 调用 Handle；runSync/unlock 为内部方法</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 9 层 ==================== -->
+<section class="layer-section" id="layer-9">
+  <div class="layer-header">
+    <span>第 9 层 · 对账引擎（reconciliation）</span>
+    <span class="layer-meta">1 个文件 · 164 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-37">
+  <h3 class="file-title">37 · internal/reconciliation/reconciler.go（192 行）— 源端与目标端全量对账</h3>
+  <p class="file-duty">职责：拉源端全量数据与 synced_records 目标端全量数据，装进两个 map 后纯函数对比，产出四类差异列表。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Reconcile(ctx, connectionID, userID, syncContent)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">src = source.NewSource(ctx, db, connectionStore, connectionID, syncContent)（复用 Worker 同一工厂）</span></div>
+    <div class="fc-arrow">↓ err → return err；defer src.Close()</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">分页拉源端：cursor="" 循环 src.Fetch(ctx, cursor, 100) → sourceMap[rec.ID]=rec；cursor=next；!hasmore break</span></div>
+    <div class="fc-arrow">↓ err → return「同步数据时发生错误」</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">分页拉目标端：syncedStore.ListRecordsByUserAndConnection(ctx, userID, connectionID, 100, offset) → targetMap[rec.ID]=rec；offset+=len；len==0 break</span></div>
+    <div class="fc-arrow">↓ 按 user_id+connection_id 过滤，避免多源混账</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">diffs := compareMaps(sourceMap, targetMap)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">return diffs, nil</span></div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">compareMaps 纯函数遍历对比</h4>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">compareMaps(sourceMap, targetMap)</span></div>
+    <div class="fc-arrow">↓ 4a：遍历 sourceMap</div>
+    <div class="fc-row"><span class="fc-step">for id, srcRec := range sourceMap</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">tgtRec, exists := targetMap[id] —— 目标端存在该 id？</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">!exists</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">append Diff{missing_in_target, SourceVersion, SourceHash=hash(srcRec.Data)}</span>
+        <span class="fc-arrow">↓ continue</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">exists</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide">srcRec.Version != tgtRec.Version ?</span>
+        <span class="fc-arrow">↓</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">版本不同</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-error">append Diff{version_mismatch, 双方版本, 双方 hash}</span>
+            <span class="fc-arrow">↓ continue</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">版本相同</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-decide">hash(srcRec.Data) != hash(tgtRec.Data) ?</span>
+            <span class="fc-arrow">↓</span>
+            <div class="fc-branches">
+              <div class="fc-branch">
+                <span class="fc-branch-label">hash 不同</span>
+                <span class="fc-arrow">↓</span>
+                <span class="fc-error">append Diff{content_mismatch, 版本相同但内容被篡改}</span>
+              </div>
+              <div class="fc-branch">
+                <span class="fc-branch-label">hash 相同</span>
+                <span class="fc-arrow">↓</span>
+                <span class="fc-note">一致，无差异</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fc-arrow">↓ 4b：再遍历 targetMap 找多余</div>
+    <div class="fc-row"><span class="fc-step">for id, tgtRec := range targetMap</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">_, exists := sourceMap[id] ?（源端已没有这条）</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">!exists</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">append Diff{extra_in_target, TargetVersion, TargetHash}（源端已删，目标端残留）</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">exists</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-note">已在 4a 比过</span>
+      </div>
+    </div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">return diffs</span></div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>Reconcile</code>（L59-114）复用 <code>source.NewSource</code> 工厂，与 Worker 跑同步用同一套源端接入逻辑；源端用 cursor 分页、目标端用 offset 分页，各 100 条/页。</li>
+      <li>目标端查询 <code>ListRecordsByUserAndConnection(ctx, userID, connectionID, ...)</code> 强制按 user+connection 双条件过滤，多租户隔离，避免跨源混账。</li>
+      <li><code>compareMaps</code>（L126-184）是纯函数，不碰 DB/网络，输入两 map 输出差异切片，便于单测。</li>
+      <li>四类差异优先级：missing_in_target → version_mismatch → content_mismatch（在源端循环内短路 continue）；extra_in_target 在第二次遍历单独产出。</li>
+      <li>内容比较用 <code>hash()</code>（L188-191）= SHA256 十六进制，避免逐字段比 JSONB；版本相同但 hash 不同判为 content_mismatch（数据被改）。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：source.NewSource/Fetch/Close、repository.SyncedStore.ListRecordsByUserAndConnection、model.Diff/Record、crypto/sha256 ｜ 被调用：handler/job.go 的 Reconcile 方法（POST /api/jobs/:id/reconcile）调用 NewReconciler(...).Reconcile(...)</p>
+</section>
+  </div>
+</section>
+
+<!-- ==================== 第 10 层 ==================== -->
+<section class="layer-section" id="layer-10">
+  <div class="layer-header">
+    <span>第 10 层 · HTTP 层（middleware / handler）</span>
+    <span class="layer-meta">4 个文件 · 569 行</span>
+  </div>
+  <div class="layer-body">
+<section class="file-block" id="file-38">
+  <h3 class="file-title">38 · internal/middleware/auth.go（101 行）— JWT 签发与登录校验中间件</h3>
+  <p class="file-duty">职责：启动时注入 JWT 密钥，HTTP 中间件解析 Bearer token 并把 userID/username 注入 gin context，另提供登录/注册时的签发函数。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">SetJWTSecret(secret)（启动时调用）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">secret == "" ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">空串</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">return error「JWT_SECRET 不能为空」（防空密钥签发）</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">非空</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">jwtSecret = []byte(secret)；return nil</span>
+      </div>
+    </div>
+  </div>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">AuthRequired() gin.HandlerFunc（每个受保护请求）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">authHeader = c.GetHeader("Authorization")</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">authHeader == "" ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">空</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">401「未登录」c.Abort()</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">非空</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">tokenString = TrimPrefix(authHeader, "Bearer ")</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide">tokenString == authHeader（无 Bearer 前缀）？</span>
+        <span class="fc-arrow">↓</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">无前缀</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-error">401「格式错误」c.Abort()</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">有前缀</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">jwt.ParseWithClaims(tokenString, &amp;Claims{}, keyfunc=jwtSecret)</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-decide">err != nil 或 !token.Valid ?</span>
+            <span class="fc-arrow">↓</span>
+            <div class="fc-branches">
+              <div class="fc-branch">
+                <span class="fc-branch-label">无效</span>
+                <span class="fc-arrow">↓</span>
+                <span class="fc-error">401「token无效」c.Abort()</span>
+              </div>
+              <div class="fc-branch">
+                <span class="fc-branch-label">有效</span>
+                <span class="fc-arrow">↓</span>
+                <span class="fc-step">c.Set("userID", claims.UserID)；c.Set("username", claims.Username)</span>
+                <span class="fc-arrow">↓</span>
+                <span class="fc-end">c.Next() 放行到后续 handler</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">GenerateToken(userID, username)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">claims = &amp;Claims{UserID, Username, RegisteredClaims}</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">jwt.NewWithClaims(HS256, claims) → SignedString(jwtSecret)</span></div>
+    <div class="fc-arrow">↓ err → return "", err</div>
+    <div class="fc-row"><span class="fc-end">return tokenString, nil</span></div>
+  </div>
+  <div class="struct-box">
+    <b>struct Claims</b>：UserID int、Username string，内嵌 jwt.RegisteredClaims
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><code>SetJWTSecret</code>（L18-24）密钥从环境变量 JWT_SECRET 注入，空串报错，防止硬编码/空密钥漏洞。</li>
+      <li><code>AuthRequired</code>（L36-84）三道闸：无 header→401 未登录；无 Bearer 前缀→401 格式错误；解析/签名/过期失败→401 token 无效。</li>
+      <li>校验通过后 <code>c.Set("userID"/"username", ...)</code> 注入 context，后续 handler 用 <code>c.Get("userID")</code> 取值，多租户隔离的信任根。</li>
+      <li><code>GenerateToken</code>（L87-100）用 HS256 对称签名，登录/注册成功时签发。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：gin、golang-jwt/jwt/v5、net/http ｜ 被调用：main 在路由组上挂 AuthRequired()；handler/auth.go 的 Login/Register 调用 GenerateToken</p>
+</section>
+<section class="file-block" id="file-39">
+  <h3 class="file-title">39 · internal/handler/auth.go（134 行）— 注册/登录/退出 HTTP 接口</h3>
+  <p class="file-duty">职责：用 bcrypt 校验密码哈希，登录或注册成功后签发 JWT 返回给前端；注册即登录。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Login(c) POST /api/login</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">username/password = c.PostForm(...)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">任一为空？</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">空</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">400「用户名或密码不能为空」</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">非空</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">user = UserStore.GetByUsername(username)</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide" style="text-align:center;">err != nil（用户不存在）？</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error" style="display:inline-block;">401「用户名或者密码错误」（不透露具体哪错）</span>
+        <span class="fc-arrow">↓ 查到用户</span>
+        <span class="fc-step">bcrypt.CompareHashAndPassword(user.PasswordHash, password)</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide" style="text-align:center;">比对失败？</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error" style="display:inline-block;">401「用户名或密码错误」</span>
+        <span class="fc-arrow">↓ 比对成功</span>
+        <span class="fc-step">token = middleware.GenerateToken(user.ID, user.UserName)</span>
+        <span class="fc-arrow">↓ err → 500 签发失败</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">201 {token, username}</span>
+      </div>
+    </div>
+  </div>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Register(c) POST /api/register</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">username/password = c.PostForm(...)</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">任一为空？</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">空</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">400「用户名或密码不能为空」</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">非空</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">hashBytes = bcrypt.GenerateFromPassword(password, cost=10)</span>
+        <span class="fc-arrow">↓ err → 500「密码无效」</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">UserStore.Create(username, string(hashBytes))</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide" style="text-align:center;">err != nil（用户名重复）？</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error" style="display:inline-block;">409「用户名已存在」</span>
+        <span class="fc-arrow">↓ 创建成功</span>
+        <span class="fc-step">user = UserStore.GetByUsername(username)（取回自增 ID）</span>
+        <span class="fc-arrow">↓ err → 500「查询失败」</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">token = middleware.GenerateToken(user.ID, user.UserName)</span>
+        <span class="fc-arrow">↓ err → 500「签发JWT失效」</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {token, username}（注册即登录）</span>
+      </div>
+    </div>
+  </div>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Logout(c) GET /api/logout</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-note">JWT 无状态，服务端不删任何东西，前端自行清 localStorage</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">200 {"data":""}</span></div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>密码哈希用 bcrypt cost=10（L90），登录用 <code>CompareHashAndPassword</code> 比对（L47-50），绝不存明文。</li>
+      <li>安全细节：用户不存在（L38-44）与密码错误（L51-56）统一回「用户名或密码错误」，不枚举哪个字段错，防用户枚举攻击。</li>
+      <li>注册时先 Create 再 GetByUsername 取回自增 user.ID（L109），再签发 token，实现注册即登录。</li>
+      <li>用户名重复映射为 HTTP 409 Conflict（L102）。</li>
+      <li>Logout 是空实现（L131-133），无状态 JWT 不需要服务端会话清理。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：repository.UserStore.GetByUsername/Create、golang.org/x/crypto/bcrypt、middleware.GenerateToken、gin ｜ 被调用：main 把 Login/Register/Logout 挂到 /api/login、/api/register、/api/logout（公共路由，不经过 AuthRequired）</p>
+</section>
+<section class="file-block" id="file-40">
+  <h3 class="file-title">40 · internal/handler/connection.go（141 行）— 数据源连接 CRUD 接口</h3>
+  <p class="file-duty">职责：对当前登录用户的数据源连接做列表/创建/更新/删除，所有操作以 context 中的 userID 为多租户隔离条件。</p>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">统一入口模式（四个方法共用）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">userID, ok := c.Get("userID")（AuthRequired 注入）</span></div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">!ok</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">401「未登录/用户未登录」</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">ok</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">userIDint := userID.(int)</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide" style="text-align:center;">按 HTTP 方法分支</span>
+      </div>
+    </div>
+  </div>
+  <div class="fc">
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">ListConnections GET</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">ConnStore.ListByUser(ctx, userIDint)</span>
+        <span class="fc-arrow">↓ err → 500</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {data: conns}</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">CreateConnection POST</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">ShouldBindJSON{name,source_type,source_url}</span>
+        <span class="fc-arrow">↓ 绑错 → 400</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">ConnStore.Create(ctx, userIDint, name, type, url)</span>
+        <span class="fc-arrow">↓ err → 500</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">201 {data: req}</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">UpdateConnection PUT /:id</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">id = Atoi(c.Param("id"))（错 → 400）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">ShouldBindJSON{...}</span>
+        <span class="fc-arrow">↓ 绑错 → 400</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">ConnStore.Update(ctx, id, userIDint, ...)</span>
+        <span class="fc-arrow">↓ err → 500</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {data: req}</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">DeleteConnection DELETE /:id</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">id = Atoi(c.Param("id"))（错 → 400）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">ConnStore.Delete(ctx, id, userIDint)</span>
+        <span class="fc-arrow">↓ err → 500</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {data: "success"}</span>
+      </div>
+    </div>
+  </div>
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li>四个方法（L21-140）统一模式：取 userID → 类型断言 int → 绑参/取路径 id → 调 Store → 回 JSON，结构高度一致。</li>
+      <li>多租户隔离双重保险：handler 从 context 取 userID，并把它作为参数传给 Store 的 ListByUser / Create(userID,...) / Update(id, userID,...) / Delete(id, userID,...)，SQL 层带 user_id 条件，用户只能操作自己的连接。</li>
+      <li>路径参数用 <code>strconv.Atoi(c.Param("id"))</code> 校验，非数字回 400。</li>
+      <li>Create/Update 用匿名 struct + ShouldBindJSON 绑定请求体。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：repository.ConnectionStore.ListByUser/Create/Update/Delete、strconv、gin ｜ 被调用：main 在 AuthRequired 路由组下把四方法挂到 /api/connections（含 /:id）</p>
+</section>
+<section class="file-block" id="file-41">
+  <h3 class="file-title">41 · internal/handler/job.go（320 行）— 同步任务 CRUD、触发执行、对账与结果查询</h3>
+  <p class="file-duty">职责：同步任务的增删查、启动同步（事务性写 outbox 后立即返回）、触发对账、分页查同步记录。</p>
+
+  <h4 style="margin:10px 0 4px;color:#333;">RunJob：事务性 Outbox 前端落点（重点）</h4>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">RunJob(c) POST /api/jobs/:id/run</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">userID,ok := c.Get("userID")（!ok → 401）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">id = Atoi(c.Param("id"))（错 → 400）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">job = JobStore.GetByID(id)（err → 404「任务不存在」）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">job.UserID != userIDint ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">不属于当前用户</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">403「无权操作」</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">验权通过</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">taskName = strconv.Itoa(id)；payload = mq.MarshalOutboxPayload(id, taskName, job.ConnectionID, attempt=0, delayMs=0)</span>
+        <span class="fc-arrow">↓ err → 500「构造消息失败」</span>
+        <span class="fc-arrow">↓ 【事务边界开始】</span>
+        <span class="fc-step" style="border-style:dashed;">tx = h.DB.Begin(ctx)（defer tx.Rollback）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step" style="border-style:dashed;">h.Outbox.Insert(ctx, tx, payload)（err → 500「记录消息失败」并回滚）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step" style="border-style:dashed;">tx.Commit(ctx)（err → 500「提交事务失败」）</span>
+        <span class="fc-arrow">↓ 【事务边界结束】HTTP 立即返回，不阻塞</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-note">后续由 dispatcher（文件35）扫到 DelayMs=0 → 立即 Publish → Worker Handle（文件36）消费</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">log「已投递到 MQ」；200 {data:"任务已发送"}</span>
+      </div>
+    </div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">Reconcile：触发对账</h4>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">Reconcile(c) POST /api/jobs/:id/reconcile</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">取 userID（!ok→401）；id=Atoi(param)（错→400）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">job = JobStore.GetByID(id)（err→404）；job.UserID!=userID → 403</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">diffs = Reconciler.Reconcile(ctx, job.ConnectionID, userIDint, job.SyncContent)（见文件37）</span></div>
+    <div class="fc-arrow">↓ err → 400「对账出现错误」</div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-end">200 {job_id, connection_id, difference_count, data: diffs}</span></div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">CreateJob：校验源/目标归属后建任务</h4>
+  <div class="fc">
+    <div class="fc-row"><span class="fc-start">CreateJob(c) POST /api/jobs</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">取 userID（!ok→401）；ShouldBindJSON{connection_id, target_connection_id?, task_name, sync_content}（错→400）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-row"><span class="fc-step">conn = ConnStore.GetByID(req.ConnectionID)（err→404「数据源不存在」）</span></div>
+    <div class="fc-arrow">↓</div>
+    <div class="fc-decide" style="text-align:center;">conn.UserID != userIDint ?</div>
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">源无权</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-error">403「无权使用该数据源」</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">源有权</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-decide">TargetConnectionID != nil ?</span>
+        <span class="fc-arrow">↓</span>
+        <div class="fc-branches">
+          <div class="fc-branch">
+            <span class="fc-branch-label">填了目标</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-step">targetConn = GetByID(*TargetConnectionID)（err→404）</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-decide">targetConn.UserID != userIDint ?</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-error" style="display:inline-block;">403「无权使用该目标数据源」</span>
+          </div>
+          <div class="fc-branch">
+            <span class="fc-branch-label">未填（nil→内部存储）</span>
+            <span class="fc-arrow">↓</span>
+            <span class="fc-note">跳过目标校验</span>
+          </div>
+        </div>
+        <span class="fc-arrow">↓ 校验全过</span>
+        <span class="fc-step">jobID = JobStore.Create(ctx, userIDint, ConnectionID, TargetConnectionID, TaskName, SyncContent)</span>
+        <span class="fc-arrow">↓ err → 500「创建失败」</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">201 {data: {id: jobID}}</span>
+      </div>
+    </div>
+  </div>
+
+  <h4 style="margin:10px 0 4px;color:#333;">其余方法 ListJobs / GetJob / DeleteJob / ListRecords</h4>
+  <div class="fc">
+    <div class="fc-branches">
+      <div class="fc-branch">
+        <span class="fc-branch-label">ListJobs GET</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">取 userID → JobStore.ListByUser(userID)</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {data: jobs}</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">GetJob GET /:id</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">取 userID；id=Atoi（错→400）；GetByID（err→404）</span>
+        <span class="fc-arrow">↓ job.UserID!=userID → 403</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {data: job}</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">DeleteJob DELETE /:id</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">取 userID；id=Atoi（错→400）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">JobStore.Delete(id, userIDint)（err→500）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {data:"删除成功"}</span>
+      </div>
+      <div class="fc-branch">
+        <span class="fc-branch-label">ListRecords GET /api/records</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">取 userID；limit=DefaultQuery("limit","50")、offset=DefaultQuery("offset","0")（Atoi 错→400）</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-step">syncedStore = NewSyncedStore(DB) → ListRecordsByUser(userID, limit, offset)</span>
+        <span class="fc-arrow">↓ err → 500</span>
+        <span class="fc-arrow">↓</span>
+        <span class="fc-end">200 {data: list}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="file-details">
+    <h4>关键逻辑详解</h4>
+    <ul>
+      <li><b>RunJob 事务边界（L215-230）</b>：<code>Begin → Outbox.Insert(tx,payload) → Commit</code>，defer Rollback 兜底。HTTP 只负责把"待发消息"原子落库，真正发 MQ 由文件35 dispatcher 异步完成——这是事务性 Outbox 模式的前端落点，进程崩溃也不丢任务。</li>
+      <li>RunJob 不直接调 MQ.Publish，而是写 outbox（DelayMs=0），实现了与文件36 Worker 的解耦；attempt 从 0 开始。</li>
+      <li><b>CreateJob 双重归属校验</b>（L80-101）：源 connection 必须属于当前用户；若填了目标 connection，同样校验归属，否则 403；未填目标表示写内部存储。</li>
+      <li><b>Reconcile</b>（L278-319）验权后把 connectionID、userID、syncContent 传给 reconciliation.Reconciler（文件37），返回 difference_count 与差异列表。</li>
+      <li>ListRecords（L238-269）用 limit/offset 分页（默认 50/0），按 userID 查 synced_records。</li>
+      <li>所有方法的鉴权统一靠 <code>c.Get("userID")</code> + 查库后比对 <code>job.UserID/conn.UserID</code>，与 connection.go 一致的多租户模式。</li>
+    </ul>
+  </div>
+  <p class="file-deps">调用：repository.JobStore/ConnectionStore/SyncedStore/DB/OutboxStore、mq.MarshalOutboxPayload、reconciliation.Reconciler、strconv、gin ｜ 被调用：main 在 AuthRequired 路由组下挂载 /api/jobs（含 /:id/run、/:id/reconcile）与 /api/records</p>
+</section>
+  </div>
+</section>
+
+</div><!-- /.container -->
+
+</body>
+</html>

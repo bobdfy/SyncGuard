@@ -60,14 +60,6 @@ func (s *Source) Close() error { return nil }
 SourceError 包装 GitHub API 返回的 HTTP 错误状态码。
 
 它实现了 error 接口，Worker 那边用 errors.As 判断具体是哪种错误：
-
-	var srcErr *SourceError
-	if errors.As(err, &srcErr) {
-	    switch srcErr.StatusCode {
-	    case 403, 429: // 限流 → 等一会重试
-	    case 404:       // 仓库不存在 → 别重试了
-	    }
-	}
 */
 type SourceError struct {
 	StatusCode int // GitHub 返回的 HTTP 状态码（403/404/429 等）
@@ -78,20 +70,7 @@ func (e *SourceError) Error() string {
 	return fmt.Sprintf("GitHub API 返回状态码: %d", e.StatusCode)
 }
 
-/*
-Fetch 从 GitHub 拉一页 Issue，转成 []model.Record 返回。
-
-参数：
-  - ctx:   上下文（超时控制、取消信号）
-  - cursor: 页码字符串，空 = 第 1 页
-  - limit:  每页多少条（同时传给 GitHub API 的 per_page）
-
-返回：
-  - records:    本页 Record 列表
-  - nextCursor: 下一页页码字符串，没有下一页时为空
-  - hasMore:    是否还有更多数据
-  - err:        错误（网络问题 / API 报错）
-*/
+// Fetch 从 GitHub 拉一页 Issue，转成 []model.Record 返回。
 func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.Record, string, bool, error) {
 	//
 	// 第 1 步：cursor（页码字符串）→ page（整数）
@@ -131,7 +110,6 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 	}
 	defer resp.Body.Close() // 函数返回时自动关闭响应体，防止连接泄漏
 
-	//
 	// 第 5 步：检查 HTTP 状态码
 	// GitHub API 的典型错误码：
 	//   200      — 正常
@@ -167,9 +145,7 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 	records := make([]model.Record, 0, len(issues))
 	for _, issue := range issues {
 
-		//
 		// 7a. 过滤 Pull Request
-		//
 		// GitHub 的 Issue 和 PR 共享同一个编号。
 		// 比如 Issue #42 和 PR #42 不可能同时存在，它们共用编号空间。
 		// /issues 接口把 Issue 和 PR 一起返回。
@@ -179,13 +155,11 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		//   - PR:    "pull_request" 字段是 {}   → Go 里解析为非 nil 的指针
 		//
 		// 所以 issue.PullRequest != nil → 这是 PR，跳过。
-		//
 		if issue.PullRequest != nil {
 			continue
 		}
 
 		// 7b. 组装 Data（Issue 的业务信息，存到 JSONB）
-
 		// gitHubIssue 是全量的（字段和 API 返回值一一对应），
 		// gitHubIssueData 是精简的（只保留对账需要的字段）。
 		//
@@ -205,9 +179,7 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 			continue // 极少发生（结构体全是简单类型），跳过不影响其他
 		}
 
-		//
 		// 7c. 构造 Record
-
 		// Record 是 engine.Source 接口要求返回的标准格式。
 		//
 		// 字段映射：
@@ -227,7 +199,6 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		})
 	}
 
-	//
 	// 第 8 步：判断是否还有下一页 + 生成 nextCursor
 	//
 	// GitHub Issues API 不返回总数，只能靠"本页结果数 == limit"推测：
@@ -333,8 +304,7 @@ func makeLabels(labels []gitHubLabel) []string {
 	return result
 }
 
-// truncate 截斷字串，超過 maxLen 的部分用 "..." 替換。
-// 防止超長 Issue body（如 Linux 內核討論帖可能有幾十 KB）把 JSONB 欄位撐爆。
+// truncate 截断字串，超过 maxLen 的部分用 "..." 替换。
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

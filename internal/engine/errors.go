@@ -7,7 +7,4 @@ import "errors"
 // 数据源配置写错（GitHub 的 owner/repo 格式不对、source_type 不支持）
 // 就属于这类：重试多少次都一样失败。Worker 应直接进 DLQ 等人工处理，
 // 而不是走退避重投白白消耗重试次数和延迟。
-//
-// 用法：底层出错时用 fmt.Errorf("...: %w", ErrNonRetryable) 包装，
-// 上层用 errors.Is(err, ErrNonRetryable) 判定。
 var ErrNonRetryable = errors.New("不可重试的永久错误")

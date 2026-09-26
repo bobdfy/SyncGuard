@@ -15,7 +15,7 @@ import (
 /*
 NewSource 根据 connectionID 查 DB，按 source_type 创建对应的 Source 实现。
 
-这就是"工厂模式"：调用方只拿到 engine.Source 接口，不关心具体是 mock 还是 github。
+这就是"工厂模式"：调用方具只拿到 engine.Source 接口，不关心体是 mock 还是 github。
 以后加 GitLab、Jira 等新数据源，只需：
  1. 写一个新包（如 internal/source/gitlab/source.go），实现 Fetch 方法
  2. 在这里加一个 case
@@ -38,25 +38,17 @@ func NewSource(ctx context.Context, db *repository.DB, connectionStore *reposito
 
 	// 2. 根据 source_type 选择实现
 	switch conn.SourceType {
+
 	case "mock":
 		return mock.NewGenerator(1000), nil
 
 	case "github":
-		// source_url 格式是 "owner/repo"，如 "golang/go"
-		// 用 SplitN 切成两份：owner 和 repo
-		//
-		// strings.SplitN 签名：func SplitN(s, sep string, n int) []string
-		//   SplitN("golang/go", "/", 2) → ["golang", "go"]
-		//   n=2 表示最多切 2 份，防止 repo 名里有 "/" 时切成 3+ 份
-		//   如果字符串里没有 "/"，返回的切片长度 < 2
-
 		parts := strings.SplitN(conn.SourceURL, "/", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("GitHub source_url 格式错误，需要 owner/repo: %w(实际: %s)", engine.ErrNonRetryable, conn.SourceURL)
 		}
 		owner := parts[0]
 		repo := parts[1]
-
 		return github.NewSource(owner, repo), nil
 
 	case "postgres":

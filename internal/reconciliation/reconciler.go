@@ -108,7 +108,22 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int
 		offset += len(records)
 	}
 
-	// 第 4 步：对比两个 map，分类差异
+	// 第 4 步：对比两个 map，分类差异（纯函数，独立可测）
+	diffs := compareMaps(sourceMap, targetMap)
+	return diffs, nil
+}
+
+// compareMaps 对比源端与目标端两个 map，产出四类差异。
+//
+// 纯函数：不碰 DB / 网络，输入两个 map，输出差异列表，便于单元测试。
+//
+// 四类差异：
+//
+//	missing_in_target  — 源端有，目标端缺失（同步漏了）
+//	extra_in_target    — 目标端有，源端没有（源端删了这条数据）
+//	version_mismatch   — 版本号不一样（目标端是旧版本）
+//	content_mismatch   — 版本号一样但内容 Hash 不同（数据被改了）
+func compareMaps(sourceMap, targetMap map[string]model.Record) []model.Diff {
 	var diffs []model.Diff
 
 	// 4a. 源端有 → 检查目标端
@@ -154,7 +169,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int
 		}
 	}
 
-	// 4a 已经把源端有的全比过了，这里只找目标端多出来的
+	// 4b. 源端有的已经全比过，这里只找目标端多出来的
 	for id, tgtRec := range targetMap {
 		if _, exists := sourceMap[id]; !exists {
 			diffs = append(diffs, model.Diff{
@@ -165,7 +180,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int
 			})
 		}
 	}
-	return diffs, nil
+	return diffs
 }
 
 // hash 计算数据的 SHA256 Hash，返回十六进制字符串。

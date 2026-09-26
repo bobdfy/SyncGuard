@@ -13,7 +13,6 @@ import (
 
 // Generator 模拟数据源
 // 预生成指定数量的记录存内存，实现 engine.Source 接口
-// 用于 V0 阶段验证同步引擎的核心逻辑
 type Generator struct {
 	records []model.Record
 
@@ -24,12 +23,6 @@ type Generator struct {
 var _ engine.Source = (*Generator)(nil)
 
 // NewGenerator 预生成 count 条记录
-//
-// 规则：
-//   - ID 格式 "record_0001" ~ "record_9999"
-//   - Version 从 1 开始，随机递增（模拟真实更新）
-//   - UpdatedAt 从 2026-01-01 开始每条约 +30s（模拟时间推进）
-//   - 约 5% 的记录相邻时间戳相同（模拟真实并发写入场景）
 func NewGenerator(count int) *Generator {
 	g := &Generator{
 		records:     make([]model.Record, count),
@@ -59,12 +52,6 @@ func NewGenerator(count int) *Generator {
 //
 // 基于 cursor（最后一条记录 ID）定位，返回接下来的 limit 条
 // cursor 为空字符串表示从头开始
-//
-// 返回：
-//   - records: 本页记录切片
-//   - nextCursor: 下一页游标（最后一条记录的 ID），无更多数据时为空
-//   - hasMore: 是否还有更多数据
-//   - err: 错误
 func (g *Generator) Fetch(ctx context.Context, cursor string, limit int) ([]model.Record, string, bool, error) {
 	// 检查任务是否收到取消或超时信号
 	select {

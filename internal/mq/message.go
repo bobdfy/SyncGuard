@@ -18,7 +18,7 @@ type JobMessage struct {
 // DelayMs = 0 表示立即发送，>0 表示延迟该毫秒数后发送（由搬运工决定走哪条发送路径）。
 type OutboxPayload struct {
 	JobID        int    `json:"job_id"`
-	TaskName     string    `json:"task_name"`
+	TaskName     string `json:"task_name"`
 	ConnectionID int    `json:"connection_id"`
 	Attempt      int    `json:"attempt"`
 	DelayMs      int64  `json:"delay_ms"`

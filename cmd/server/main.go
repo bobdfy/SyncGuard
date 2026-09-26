@@ -40,10 +40,10 @@ func main() {
 	jobStore := repository.NewJobStore(db)
 	outboxStore := repository.NewOutboxStore(db)
 
-	// V3：创建对账引擎
+	// 创建对账引擎
 	reconciler := reconciliation.NewReconciler(db, connStore)
 
-	// ========== V2：连接 RabbitMQ，创建 Producer ==========
+	// ========== 连接 RabbitMQ，创建 Producer ==========
 	// 从 .env 读取 RabbitMQ 地址
 	rabbitURL := os.Getenv("RABBITMQ_URL")
 	if rabbitURL == "" {
@@ -61,11 +61,11 @@ func main() {
 	// 创建 Producer，往主交换机发消息
 	producer := mq.NewProducer(ch, mq.ExchangeName, mq.RoutingKey)
 
-	// 创建 Handler（V2：JobHandler 多了 Producer 参数）
+	// 创建 Handler
 	authHandler := handler.NewAuthHandler(userStore)
 	connHandler := handler.NewConnectionHandler(connStore)
 
-	jobHandler := handler.NewJobHandler(jobStore, connStore, db, producer, reconciler, outboxStore) // V3：加了对账引擎
+	jobHandler := handler.NewJobHandler(jobStore, connStore, db, producer, reconciler, outboxStore)
 
 	r := gin.Default()
 

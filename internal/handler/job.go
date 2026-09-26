@@ -169,13 +169,11 @@ func (h *JobHandler) DeleteJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": "删除成功"})
 }
 
-// RunJob POST /api/jobs/:id/run → 启动同步任务（V2：发消息到 RabbitMQ）
+// RunJob POST /api/jobs/:id/run → 启动同步任务
 //
-// V2 改动：
-//   - 不再创建 engine + goroutine
-//   - 改为调 MQ.Publish() 把任务信息发到 RabbitMQ 队列
-//   - Worker 进程收到消息后跑引擎
-//   - HTTP 请求立即返回，不阻塞
+//	调 MQ.Publish() 把任务信息发到 RabbitMQ 队列
+//	- Worker 进程收到消息后跑引擎
+//	- HTTP 请求立即返回，不阻塞
 func (h *JobHandler) RunJob(c *gin.Context) {
 	// ========== 1. 取 userID（JWT 中间件注入） ==========
 	userID, ok := c.Get("userID")
@@ -203,7 +201,7 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 		return
 	}
 
-	// ========== 4. 写 outbox：搬运工负责发消息，消息不丢 ==========
+	//4. 写 outbox：搬运工负责发消息，消息不丢
 	// taskName 用 jobID 的字符串表示，传给 Worker 后填入 engine.Run()
 	taskName := strconv.Itoa(id)
 
@@ -213,6 +211,7 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "构造消息失败"})
 		return
 	}
+
 	tx, err := h.DB.Begin(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "开启事务失败"})
@@ -224,6 +223,7 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "记录消息失败"})
 		return
 	}
+
 	if err := tx.Commit(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "提交事务失败"})
 		return

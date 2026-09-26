@@ -54,6 +54,9 @@ func (d *memDest) CompleteBatch(ctx context.Context, batchID int64, status strin
 	return nil
 }
 
+// Close 实现 engine.Destination 接口：无资源可释放。
+func (d *memDest) Close() error { return nil }
+
 func (s *failSource) Fetch(ctx context.Context, cursor string, limit int) ([]model.Record, string, bool, error) {
 	s.calls++
 	if s.calls == 1 {

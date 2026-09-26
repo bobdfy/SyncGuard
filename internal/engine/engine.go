@@ -10,9 +10,7 @@ import (
 //
 // 把 Source 的数据搬到 Destination，同时记录断点游标。
 // 中途崩溃后重启，从上次的 cursor 继续，不丢数据。
-//
 // 依赖倒置：Engine 只认 engine.Source 和 engine.Destination 接口，
-// 不依赖具体实现（mock.Generator、repository.SyncedStore）。
 type Engine struct {
 	src      Source
 	dst      Destination

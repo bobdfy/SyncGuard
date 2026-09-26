@@ -17,16 +17,6 @@ type Client struct {
 }
 
 // NewClient 创建 Redis 客户端并验证连接。
-//
-// 参数：
-//
-//	addr     — Redis 地址，格式 "host:port"
-//	password — Redis 密码，无密码传 ""
-//
-// 要点：
-//   - redis.NewClient 只创建客户端对象，不会真正连
-//   - Ping 才是真正建立连接，网络不通/密码错在这里暴露
-//   - Ping 失败要关闭客户端释放资源，再返回 error
 func NewClient(ctx context.Context, addr, password string) (*Client, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:     addr,

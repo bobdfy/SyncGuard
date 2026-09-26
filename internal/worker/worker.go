@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bobdfy/syncguard/internal/circuitbreaker"
+	"github.com/bobdfy/syncguard/internal/destination"
 	"github.com/bobdfy/syncguard/internal/engine"
 	"github.com/bobdfy/syncguard/internal/lock"
 	"github.com/bobdfy/syncguard/internal/model"
@@ -48,8 +49,6 @@ func New(db *repository.DB, connLock *lock.ConnectionLock, rdb *redisclient.Clie
 // Handle 处理单条 RabbitMQ 消息的完整生命周期。
 //
 // 职责：抢锁 → 心跳续约 → 执行引擎 → 释放锁 → 确认消息。
-// 因为抢到锁后的 defer/cancel/unlock 都必须收在这一条消息内，
-// 所以不能在消息循环里平铺这些逻辑。
 func (h *Handler) Handle(msg amqp.Delivery) {
 	// 1. 反序列化 → JobMessage
 	var jobMsg mq.JobMessage
@@ -244,8 +243,7 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 			return
 		}
 
-		//   可重试错误（熔断/网络/DB 抖动）→ 指数退避重投
-		// 退避重投：按 attempt 算延迟，attempt+1 记录到消息体。
+		// 可重试错误（熔断/网络/DB 抖动）→ 指数退避重投
 		// 事务保证「记 pending」和「记待发消息」同生共死。
 		delay := mq.BackoffDelay(jobMsg.Attempt)
 		latest, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
@@ -314,7 +312,19 @@ func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
 	// 用完关闭数据源，释放其持有的资源（postgres 连接池）。
 	defer func() { _ = src.Close() }()
 
-	dst := repository.NewJobDestination(syncedStore, jobStore, jobMsg.JobID, job.UserID, job.ConnectionID)
+	// 目标接线：目标为空/0 → 内部存储；否则 → 外部目标工厂。
+	var dst engine.Destination
+	if job.TargetConnectionID == nil || *job.TargetConnectionID == 0 {
+		dst = repository.NewInternalDest(syncedStore, job.UserID, job.ConnectionID)
+	} else {
+		dst, err = destination.NewDestination(ctx, connectionStore, *job.TargetConnectionID, job.SyncContent)
+		if err != nil {
+			return fmt.Errorf("创建目标端失败: %w", err)
+		}
+	}
+	dst = repository.NewJobDestination(dst, jobStore, jobMsg.JobID)
+	// 用完关闭目标端，释放其持有的资源（外部 PG 连接池）。
+	defer func() { _ = dst.Close() }()
 	eng := engine.New(src, dst, 200)
 
 	log.Printf("[Worker] 开始执行 job_id=%d task_name=%s", jobMsg.JobID, jobMsg.TaskName)
