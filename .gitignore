@@ -7,6 +7,5 @@ syncguard
 Thumbs.db
 .gocache/
 
-.docs/
-
-./docs
+docs/
+docx/

@@ -3,8 +3,10 @@ package reconciliation
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 
+	"github.com/bobdfy/syncguard/internal/engine"
 	"github.com/bobdfy/syncguard/internal/model"
 	"github.com/bobdfy/syncguard/internal/repository"
 	"github.com/bobdfy/syncguard/internal/source"
@@ -56,7 +58,7 @@ Reconcile 执行对账，返回差异列表。
 	diffs — 差异列表，没有差异时为空切片
 	err   — 查询/网络错误
 */
-func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int, syncContent string) ([]model.Diff, error) {
+func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int, syncContent string, targetConnectionID *int) ([]model.Diff, error) {
 
 	// 第 1 步：创建 Source，拿到源端数据访问能力
 	// 复用 Worker 那条工厂链路：
@@ -67,6 +69,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int
 		return nil, fmt.Errorf("创建数据源失败: %w", err)
 	}
 	defer func() { _ = src.Close() }()
+
+	// 镜像轨道：源是数据库表且配了数据库目标 → 直接对比两张表（列对列）。
+	if tableSrc, ok := src.(engine.TableSource); ok && targetConnectionID != nil && *targetConnectionID != 0 {
+		return r.reconcileTable(ctx, tableSrc, *targetConnectionID, syncContent)
+	}
 
 	// 第 2 步：分页读取源端全部数据 → 放进 map
 	// cursor 从空字符串开始（Source 会把 "" 当成第 1 页），
@@ -111,6 +118,79 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int
 	// 第 4 步：对比两个 map，分类差异（纯函数，独立可测）
 	diffs := compareMaps(sourceMap, targetMap)
 	return diffs, nil
+}
+
+// reconcileTable 镜像轨道对账：对比源表与目标表（两张外部 PG 表）。
+//
+// 目标表读取器复用 source.NewSource（目标连接也是 PG，返回的 *postgres.Source 天然满足 TableSource）。
+// 逐行按主键 + 整行 Hash 对比，产出四类差异；镜像无版本号，Version 恒 0，故只可能出现
+// missing_in_target / extra_in_target / content_mismatch 三类。
+func (r *Reconciler) reconcileTable(ctx context.Context, tableSrc engine.TableSource, targetConnectionID int, syncContent string) ([]model.Diff, error) {
+	dst, err := source.NewSource(ctx, r.db, r.connectionStore, targetConnectionID, syncContent)
+	if err != nil {
+		return nil, fmt.Errorf("创建目标表读取器失败: %w", err)
+	}
+	defer func() { _ = dst.Close() }()
+
+	tableDst, ok := dst.(engine.TableSource)
+	if !ok {
+		return nil, fmt.Errorf("目标端不是数据库表: %w", engine.ErrNonRetryable)
+	}
+
+	sourceMap, err := readAllRows(ctx, tableSrc)
+	if err != nil {
+		return nil, fmt.Errorf("读取源表失败: %w", err)
+	}
+	targetMap, err := readAllRows(ctx, tableDst)
+	if err != nil {
+		return nil, fmt.Errorf("读取目标表失败: %w", err)
+	}
+	return compareMaps(sourceMap, targetMap), nil
+}
+
+// readAllRows 把一张表读成 map[主键]model.Record，Data 为该行的规范 JSON（供 hash 比较）。
+// 镜像对账复用信封对账的 compareMaps：Version 恒 0，差异只可能是 缺失/多余/内容不一致。
+func readAllRows(ctx context.Context, ts engine.TableSource) (map[string]model.Record, error) {
+	schema, err := ts.TableSchema(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("读取表结构失败: %w", err)
+	}
+	if len(schema.PrimaryKey) != 1 {
+		return nil, fmt.Errorf("镜像对账仅支持单列主键: %w", engine.ErrNonRetryable)
+	}
+	pkName := schema.PrimaryKey[0]
+	pkIdx := -1
+	for i, c := range schema.Columns {
+		if c.Name == pkName {
+			pkIdx = i
+			break
+		}
+	}
+	if pkIdx < 0 {
+		return nil, fmt.Errorf("主键列 %q 不在表结构中: %w", pkName, engine.ErrNonRetryable)
+	}
+
+	result := make(map[string]model.Record)
+	cursor := ""
+	for {
+		rows, next, hasMore, err := ts.FetchRows(ctx, cursor, 100)
+		if err != nil {
+			return nil, fmt.Errorf("读取表数据失败: %w", err)
+		}
+		for _, row := range rows {
+			if pkIdx >= len(row.Values) {
+				continue // 防御：行列数对不上
+			}
+			pk := fmt.Sprintf("%v", row.Values[pkIdx])
+			data, _ := json.Marshal(row.Values)
+			result[pk] = model.Record{ID: pk, Data: data}
+		}
+		cursor = next
+		if !hasMore {
+			break
+		}
+	}
+	return result, nil
 }
 
 // compareMaps 对比源端与目标端两个 map，产出四类差异。

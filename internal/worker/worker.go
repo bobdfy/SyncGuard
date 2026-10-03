@@ -306,6 +306,12 @@ func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
 	if err != nil {
 		return fmt.Errorf("创建数据源失败: %w", err)
 	}
+
+	// 轨道分流：数据库源走「原表镜像」，其余走「通用信封」（下方现状）。
+	if tableSrc, ok := src.(engine.TableSource); ok {
+		return h.runTableSync(ctx, jobMsg, job, tableSrc, connectionStore, jobStore)
+	}
+
 	// 熔断器：per-connectionID，状态存 Redis、跨 Worker 共享。
 	breaker := circuitbreaker.New(h.rdb.Client(), jobMsg.ConnectionID, circuitbreaker.DefaultConfig())
 	src = circuitbreaker.Wrap(src, breaker)
@@ -329,6 +335,32 @@ func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
 
 	log.Printf("[Worker] 开始执行 job_id=%d task_name=%s", jobMsg.JobID, jobMsg.TaskName)
 	return eng.Run(ctx, jobMsg.TaskName)
+}
+
+// runTableSync 数据库镜像轨道：读源表结构 → 目标库建同构表 → 列对列写入。
+// 与 runSync 剩余的信封路径平行，只处理「数据库源 → 数据库目标」。
+func (h *Handler) runTableSync(ctx context.Context, jobMsg mq.JobMessage, job *model.SyncJob, tableSrc engine.TableSource, connectionStore *repository.ConnectionStore, jobStore *repository.JobStore) error {
+	// 决策点：数据库源必须有数据库目标，否则拒绝（镜像数据无处落表）。
+	if job.TargetConnectionID == nil || *job.TargetConnectionID == 0 {
+		return fmt.Errorf("数据库源必须指定数据库目标(target_connection_id): %w", engine.ErrNonRetryable)
+	}
+
+	// 用完关闭源表连接池（WrapTable 包装的是同一底层 Source，这里只关一次）。
+	defer func() { _ = tableSrc.Close() }()
+
+	tableDst, err := destination.NewTableDestination(ctx, connectionStore, *job.TargetConnectionID, job.SyncContent)
+	if err != nil {
+		return fmt.Errorf("创建镜像目标失败: %w", err)
+	}
+	defer func() { _ = tableDst.Close() }()
+
+	// 熔断器：与信封轨道同款，装饰 TableSource（保护 FetchRows 分页调用）。
+	breaker := circuitbreaker.New(h.rdb.Client(), jobMsg.ConnectionID, circuitbreaker.DefaultConfig())
+	src := circuitbreaker.WrapTable(tableSrc, breaker)
+
+	progress := repository.NewJobProgress(jobStore, jobMsg.JobID)
+	log.Printf("[Worker] 开始镜像同步 job_id=%d task_name=%s", jobMsg.JobID, jobMsg.TaskName)
+	return engine.RunTable(ctx, src, tableDst, progress, jobMsg.TaskName, 200)
 }
 
 // unlock 用独立短超时 ctx 释放锁，不复用已经 cancel 掉的业务 ctx。

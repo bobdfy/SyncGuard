@@ -303,7 +303,7 @@ func (h *JobHandler) Reconcile(c *gin.Context) {
 	}
 
 	// ========== 4. 执行对账 ==========
-	diffs, err := h.Reconciler.Reconcile(c.Request.Context(), job.ConnectionID, userIDint, job.SyncContent)
+	diffs, err := h.Reconciler.Reconcile(c.Request.Context(), job.ConnectionID, userIDint, job.SyncContent, job.TargetConnectionID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "对账出现错误"})
 		return

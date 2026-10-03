@@ -34,3 +34,24 @@ func NewDestination(ctx context.Context, connStore *repository.ConnectionStore, 
 		return nil, fmt.Errorf("不支持的目标类型: %w: %s", engine.ErrNonRetryable, conn.SourceType)
 	}
 }
+
+// NewTableDestination 根据目标连接 ID 创建数据库镜像目标（engine.TableDestination）。
+//
+// 与 NewDestination 的区别：返回的是「原表镜像」目标——按源表结构建同构表、
+// 列对列写入，而不是写 (id,version,updated_at,data) 四列信封表。用于数据库源的镜像轨道。
+func NewTableDestination(ctx context.Context, connStore *repository.ConnectionStore, targetConnectionID int, syncContent string) (engine.TableDestination, error) {
+	conn, err := connStore.GetByID(ctx, targetConnectionID)
+	if err != nil {
+		return nil, fmt.Errorf("查询目标连接配置失败: %w", err)
+	}
+
+	switch conn.SourceType {
+	case "postgres":
+		// 目标表名 = 源表名（复用 syncContent 的 "table[:pk]" 格式，只取表名）。
+		table, _, _ := strings.Cut(syncContent, ":")
+		return postgres.NewTableDestination(ctx, conn.SourceURL, table)
+
+	default:
+		return nil, fmt.Errorf("不支持的目标类型: %w: %s", engine.ErrNonRetryable, conn.SourceType)
+	}
+}
