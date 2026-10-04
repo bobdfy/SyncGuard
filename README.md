@@ -3,7 +3,7 @@
 一个**分布式数据同步系统**（Go 实现）：把数据从「源端」可靠地搬到「目标端」，支持多数据源、可插拔目标端、崩溃恢复、多 Worker 协调与数据对账。
 
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat&logo=go&logoColor=white)
-![License](https://img.shields.io/badge/License-个人学习项目-lightgrey)
+![License](https://img.shields.io/badge/License-MIT-blue)
 
 ---
 
