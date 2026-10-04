@@ -159,7 +159,7 @@ go run ./cmd/worker   # 轮询 outbox + 消费队列执行同步
 |------|------|:---:|------|
 | POST | `/api/register` | 公开 | 注册（注册即登录，返回 token） |
 | POST | `/api/login` | 公开 | 登录（返回 token） |
-| GET | `/api/logout` | JWT | 登出 |
+| POST | `/api/logout` | JWT | 登出 |
 | GET | `/api/connections` | JWT | 数据源列表 |
 | POST | `/api/connections` | JWT | 创建数据源 |
 | PUT | `/api/connections/:id` | JWT | 更新数据源 |
