@@ -1,0 +1,25 @@
+# ---- VCS / 本机文件 ----
+.git
+.gitignore
+.gitattributes
+
+# ---- 密钥与本地配置：绝不能进镜像 ----
+.env
+.env.*
+*.pem
+*.key
+
+# ---- 文档与编排（镜像里用不到）----
+README.md
+docs/
+deploy/
+migrations/
+
+# ---- IDE / 构建产物 ----
+.idea/
+.vscode/
+.gocache/
+*.exe
+*.swp
+Thumbs.db
+syncguard

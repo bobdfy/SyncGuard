@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -55,23 +55,13 @@ func (p *Producer) Publish(ctx context.Context, jobID int, taskName string, conn
 		return fmt.Errorf("发布任务消息失败: %w", err)
 	}
 
-	log.Printf("[MQ] 已发布 job_id=%d task_name=%s", jobID, taskName)
+	// 结构化日志后 [MQ] 前缀就是冗余了：JSON 里每条日志都有字段可查，
+	// 不再需要用文本前缀标识来源模块。
+	slog.Info("已发布", "job_id", jobID, "task_name", taskName)
 	return nil
 }
 
 // PublishDelayed 发布一条延迟消息到延迟重试队列。
-//
-// 用途：Worker 抢锁失败（新触发）时，把任务延迟 delay 时间后重新投递，避免忙等。
-//
-// 原理：消息带 Expiration（消息级 TTL，毫秒）进入延迟队列，到期成为死信，
-// 被队列的 x-dead-letter-exchange 转发回主交换机 → 重新进入主队列。
-//
-// 可靠性：Publisher Confirm —— 必须等到 Broker 返回 basic.ack 才返回 nil；
-// nack 或超时都视为失败。调用方拿到 nil 才能确定「延迟消息已被接收」，
-// 进而安全 Ack 原消息，避免丢消息。
-//
-// 前提：此方法所在的 Channel 必须先 Confirm(false) 开启 publisher confirm，
-// 否则 PublishWithDeferredConfirm 会报错。
 func (p *Producer) PublishDelayed(ctx context.Context, jobID int, taskName string, connectionID int, attempt int, delay time.Duration) error {
 	msg := JobMessage{
 		JobID:        jobID,
@@ -106,6 +96,21 @@ func (p *Producer) PublishDelayed(ctx context.Context, jobID int, taskName strin
 		return fmt.Errorf("延迟消息未被 RabbitMQ 确认: %v", err)
 	}
 
-	log.Printf("[MQ] 已延迟发布 job_id=%d（%s 后重试）", jobID, delay)
+	// slog.Duration：Duration 是 int64 纳秒，直接当字段会输出成一串数字，
+	// 用 slog.Duration 才渲染成 "5s" / "1m20s" 这种可读形式。
+	slog.Info("已延迟发布", "job_id", jobID, "task", taskName, slog.Duration("delay", delay))
+	return nil
+}
+
+// 把已经序列化好的字节原样发到当前 Producer 的 exchange/routingKey。
+func (p *Producer) PublishRaw(ctx context.Context, body []byte) error {
+	pub := amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		Body:         body,
+	}
+	if err := p.channel.PublishWithContext(ctx, p.exchange, p.routingKey, false, false, pub); err != nil {
+		return fmt.Errorf("发布原始消息失败: %w", err)
+	}
 	return nil
 }

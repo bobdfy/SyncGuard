@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -67,8 +68,12 @@ func AuthRequired() gin.HandlerFunc {
 
 		// 4. 解析失败或 token 无效 → 401
 		if err != nil || !token.Valid {
+			msg := "token无效"
+			if errors.Is(err, jwt.ErrTokenExpired) {
+				msg = "登录已过期，请重新登录"
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "token无效",
+				"error": msg,
 			})
 			c.Abort()
 			return
@@ -83,11 +88,18 @@ func AuthRequired() gin.HandlerFunc {
 	}
 }
 
+const tokenTTL = 24 * time.Hour
+
 // GenerateToken 用 userID 和 username 签发一个新的 JWT token 字符串
 func GenerateToken(userID int, username string) (string, error) {
+	now := time.Now()
 	claims := &Claims{
 		UserID:   userID,
 		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(tokenTTL)),
+		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

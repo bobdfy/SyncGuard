@@ -2,16 +2,24 @@ name: syncguard
 
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:${POSTGRES_VERSION:-18}
+    command: ["postgres", "-c", "wal_level=logical"]
     container_name: syncguard-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: syncguard
       POSTGRES_DB: postgres
     ports:
-      - "5432:5432"   # PostgreSQL 默认端口
+      - "5432:5432"   # 保留宿主机映射：本地 go run 直连
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql   # 勿改挂载路径：现有数据在此卷内
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:4.3-management
@@ -24,15 +32,107 @@ services:
       RABBITMQ_DEFAULT_PASS: syncguard
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   redis:
-    image: redis
+    image: redis:8-alpine
     container_name: syncguard-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---- 一次性迁移：等 postgres 就绪 → 有 users 表则跳过 → 否则按序应用 SQL ----
+  migrate:
+    # 复用 postgres 镜像：自带 psql + pg_isready，零额外拉取
+    image: postgres:${POSTGRES_VERSION:-18}
+    container_name: syncguard-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: syncguard
+      PGDATABASE: postgres
+    volumes:
+      # 相对路径按 compose 文件所在目录（deploy/）解析
+      - ./migrate.sh:/migrate.sh:ro
+      - ../migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "/migrate.sh"]
+    restart: "no"   # 一次性任务：跑完退出（exit 0），不重启
+
+  server:
+    build:
+      context: ..          # 构建上下文 = 仓库根目录
+      dockerfile: Dockerfile
+    image: syncguard:local
+    container_name: syncguard-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully   # 迁移完成（或守卫跳过）后才启动
+    environment:
+      DATABASE_URL: postgres://postgres:syncguard@postgres:5432/postgres?sslmode=disable
+      RABBITMQ_URL: amqp://syncguard:syncguard@rabbitmq:5672/
+      JWT_SECRET: ${JWT_SECRET:-please-change-me}   # 可被 shell 环境变量或 deploy/.env 覆盖
+      PORT: "9090"
+    ports:
+      - "9090:9090"
+    healthcheck:
+      # alpine 自带 busybox wget；打 / 返回 login.html 即视为存活
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://127.0.0.1:9090/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: syncguard:local
+    container_name: syncguard-worker
+    command: ["/app/syncguard-worker"]   # 同一镜像，覆盖 CMD 换成 worker 入口
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:syncguard@postgres:5432/postgres?sslmode=disable
+      RABBITMQ_URL: amqp://syncguard:syncguard@rabbitmq:5672/
+      REDIS_ADDR: redis:6379
+      REDIS_PASS: ""
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}    # 可选：GitHub 源限流 60 → 5000 req/h
+    healthcheck:
+      # worker 无 HTTP 端口，用进程存活检查；崩溃恢复靠 restart: unless-stopped 兜底
+      test: ["CMD-SHELL", "pgrep -f '^/app/syncguard-worker' >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
 
 volumes:
   postgres_data:

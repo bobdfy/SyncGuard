@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -47,29 +47,31 @@ func New(db *repository.DB, connLock *lock.ConnectionLock, rdb *redisclient.Clie
 }
 
 // Handle 处理单条 RabbitMQ 消息的完整生命周期。
-//
 // 职责：抢锁 → 心跳续约 → 执行引擎 → 释放锁 → 确认消息。
 func (h *Handler) Handle(msg amqp.Delivery) {
 	// 1. 反序列化 → JobMessage
 	var jobMsg mq.JobMessage
 	if err := json.Unmarshal(msg.Body, &jobMsg); err != nil {
-		log.Printf("[Worker] 解析 JSON 消息失败: %v", err)
+		slog.Error("解析 JSON 消息失败", "err", err)
 		msg.Nack(false, false)
 		return
 	}
-	log.Printf("[Worker] 收到消息 job_id=%d task_name=%s", jobMsg.JobID, jobMsg.TaskName)
 
-	jobStore := repository.NewJobStore(h.db)
+	// 链路标签：之后这条消息的所有日志都带这三个字段，
+	// 排查时按 job_id 一过滤，整条生命周期就串起来了。
+	lg := slog.With("job_id", jobMsg.JobID, "task", jobMsg.TaskName, "conn", jobMsg.ConnectionID)
+	lg.Info("收到消息")
 
 	// 2. 幂等保护：已完成的任务直接 Ack 跳过
+	jobStore := repository.NewJobStore(h.db)
 	job, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
 	if err != nil {
-		log.Printf("[Worker] 查询任务 %d 失败: %v", jobMsg.JobID, err)
+		lg.Error("查询任务失败", "err", err)
 		msg.Nack(false, false)
 		return
 	}
 	if job.Status == model.JobStatusCompleted {
-		log.Printf("[Worker] 任务已执行，跳过")
+		lg.Info("任务已完成，跳过")
 		msg.Ack(false)
 		return
 	}
@@ -78,67 +80,18 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 	credential, acquired, err := h.connLock.Lock(context.Background(), jobMsg.ConnectionID, jobMsg.JobID, lease)
 	if err != nil {
 		// Redis/锁系统异常，任务无法执行，进 DLQ 等后续重试
-		log.Printf("[Worker] 抢锁失败(Redis 异常): %v", err)
+		lg.Error("抢锁失败(Redis 异常)", "err", err)
 		msg.Nack(false, false)
 		return
 	}
 	if !acquired {
-		// 抢不到锁：判断是「同一 job 重复投递」还是「新同步触发」
-		owner, found, err := h.connLock.Owner(context.Background(), jobMsg.ConnectionID)
-		if err != nil {
-			// Redis 查询失败，无法判断，保守进 DLQ
-			log.Printf("[Worker] 查询锁持有者失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		if found && owner == jobMsg.JobID {
-			// 同一个 job 的重复投递，合并掉
-			log.Printf("[Worker] job_id=%d 重复投递，跳过", jobMsg.JobID)
-			msg.Ack(false)
-			return
-		}
-
-		// 新触发（found=false 或 owner != jobID）：记录 pending + 写 outbox 延迟重投。
-		// 事务保证「记 pending」和「记待发消息」同生共死，消息不会丢。
-		payload, err := mq.MarshalOutboxPayload(jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt, lease.Milliseconds())
-		if err != nil {
-			log.Printf("[Worker] 构造 outbox payload 失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		tx, err := h.db.Begin(context.Background())
-		if err != nil {
-			log.Printf("[Worker]开启事务失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		defer tx.Rollback(context.Background())
-
-		if err := jobStore.UpdateStatusInTx(context.Background(), tx, jobMsg.JobID, model.JobStatusPending, job.TotalCount, job.Cursor, "connection 被占用，已延迟重投"); err != nil {
-			log.Printf("[Worker] 记录 pending 失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-
-		if err := h.outbox.Insert(context.Background(), tx, payload); err != nil {
-			log.Printf("[Worker] 写 outbox 失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		if err := tx.Commit(context.Background()); err != nil {
-			log.Printf("[Worker] 提交事务失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		log.Printf("[Worker] job_id=%d 新触发，已记录 pending 并延迟重投", jobMsg.JobID)
-		msg.Ack(false)
+		h.handleLockBusy(msg, jobMsg, lg)
 		return
 	}
+
 	// 4. 抢到锁：taskCtx 和 hbCtx 分离
-	//
 	// taskCtx 传给 eng.Run，Renew 失败时 cancelTask 停任务；
 	// hbCtx 只控制心跳 goroutine，正常收尾时 cancelHb 停心跳。
-	// 两者分离，避免「正常结束 cancel 任务」被误判成 Renew 失败。
 	taskCtx, cancelTask := context.WithCancel(context.Background())
 	defer cancelTask()
 	hbCtx, cancelHb := context.WithCancel(context.Background())
@@ -169,129 +122,127 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 	}()
 
 	// 5. 组装引擎并执行（ctx 用 taskCtx，Renew 失败能真正中断任务）
-	runErr := h.runSync(taskCtx, jobMsg)
+	runErr := h.runSync(taskCtx, jobMsg, lg)
 
 	// 6. 正常收尾：停心跳 → 等心跳退出 → 释放锁
 	cancelHb()
 	<-renewDone
-	h.unlock(jobMsg.ConnectionID, credential)
+	h.unlock(jobMsg.ConnectionID, credential, lg)
 
-	// 7. 判定最终结果
-	if leaseLost.Load() {
-		// 租约丢了，这次同步不可信（可能别的 Worker 已接管），进 DLQ
-		log.Printf("[Worker] job_id=%d 租约丢失，进 DLQ", jobMsg.JobID)
+	// 7. 判定最终结果并确认消息
+	h.settle(msg, jobMsg, leaseLost.Load(), runErr, lg)
+}
+
+// handleLockBusy 抢锁失败的分流：同一 job 重复投递直接合并；
+// 新触发则记 pending 并延迟重投（延迟 = 锁租约，给持锁方留执行窗口）。
+func (h *Handler) handleLockBusy(msg amqp.Delivery, jobMsg mq.JobMessage, lg *slog.Logger) {
+	owner, found, err := h.connLock.Owner(context.Background(), jobMsg.ConnectionID)
+	if err != nil {
+		// Redis 查询失败，无法判断，保守进 DLQ
+		lg.Error("查询锁持有者失败", "err", err)
 		msg.Nack(false, false)
 		return
 	}
-	if runErr != nil {
-		// 熔断：数据源冷却中，按冷却时长写 outbox 延迟重投。
-		// 事务保证「记 pending」和「记待发消息」同生共死。
-		if errors.Is(runErr, circuitbreaker.ErrCircuitOpen) {
-			latest, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
-			if err != nil {
-				log.Printf("[Worker] 查询任务 %d 失败: %v", jobMsg.JobID, err)
-				msg.Nack(false, false)
-				return
-			}
-			delay := circuitbreaker.DefaultConfig().OpenTimeout //60s，与熔断冷却对齐
-			payload, err := mq.MarshalOutboxPayload(jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt+1, delay.Milliseconds())
-			if err != nil {
-				log.Printf("[Worker] 构造 outbox payload 失败: %v", err)
-				msg.Nack(false, false)
-				return
-			}
-			tx, err := h.db.Begin(context.Background())
-			if err != nil {
-				log.Printf("[Worker] 开启事务失败: %v", err)
-				msg.Nack(false, false)
-				return
-			}
-			defer tx.Rollback(context.Background())
-
-			if err := jobStore.UpdateStatusInTx(context.Background(), tx, jobMsg.JobID, model.JobStatusPending, latest.TotalCount, latest.Cursor, "熔断中，冷却后重试"); err != nil {
-				log.Printf("[Worker] 记录 pending 失败: %v", err)
-				msg.Nack(false, false)
-				return
-			}
-			if err := h.outbox.Insert(context.Background(), tx, payload); err != nil {
-				log.Printf("[Worker] 写 outbox 失败: %v", err)
-				msg.Nack(false, false)
-				return
-			}
-			if err := tx.Commit(context.Background()); err != nil {
-				log.Printf("[Worker] 提交事务失败: %v", err)
-				msg.Nack(false, false)
-				return
-			}
-			log.Printf("[Worker] job_id=%d 熔断中，%s 后重试", jobMsg.JobID, delay)
-			msg.Ack(false)
-			return
-		}
-
-		// 失败分流：
-		//   永久错误（数据源配置错）→ 直接 DLQ，重试无意义
-		if errors.Is(runErr, engine.ErrNonRetryable) {
-			log.Printf("[Worker] job_id=%d 永久失败，进 DLQ: %v", jobMsg.JobID, runErr)
-			msg.Nack(false, false)
-			return
-		}
-
-		//   重试次数到上限 → DLQ 放弃
-		if jobMsg.Attempt >= mq.MaxAttempts {
-			log.Printf("[Worker] job_id=%d 重试 %d 次仍失败，进 DLQ: %v", jobMsg.JobID, jobMsg.Attempt, runErr)
-			msg.Nack(false, false)
-			return
-		}
-
-		// 可重试错误（熔断/网络/DB 抖动）→ 指数退避重投
-		// 事务保证「记 pending」和「记待发消息」同生共死。
-		delay := mq.BackoffDelay(jobMsg.Attempt)
-		latest, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
-		if err != nil {
-			log.Printf("[Worker] 查询任务 %d 失败: %v", jobMsg.JobID, err)
-			msg.Nack(false, false)
-			return
-		}
-		payload, err := mq.MarshalOutboxPayload(jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, jobMsg.Attempt+1, delay.Milliseconds())
-		if err != nil {
-			log.Printf("[Worker] 构造 outbox payload 失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		tx, err := h.db.Begin(context.Background())
-		if err != nil {
-			log.Printf("[Worker] 开启事务失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		defer tx.Rollback(context.Background())
-
-		if err := jobStore.UpdateStatusInTx(context.Background(), tx, jobMsg.JobID, model.JobStatusPending, latest.TotalCount, latest.Cursor, "执行失败，退避重试"); err != nil {
-			log.Printf("[Worker] 记录 pending 失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		if err := h.outbox.Insert(context.Background(), tx, payload); err != nil {
-			log.Printf("[Worker] 写 outbox 失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		if err := tx.Commit(context.Background()); err != nil {
-			log.Printf("[Worker] 提交事务失败: %v", err)
-			msg.Nack(false, false)
-			return
-		}
-		log.Printf("[Worker] job_id=%d 第 %d 次失败，%s 后重试", jobMsg.JobID, jobMsg.Attempt, delay)
+	if found && owner == jobMsg.JobID {
+		// 同一个 job 的重复投递，合并掉
+		lg.Info("重复投递，跳过")
 		msg.Ack(false)
 		return
 	}
-	log.Printf("[Worker] job_id=%d 执行完成", jobMsg.JobID)
+
+	// 新触发：attempt 不递增——这不是失败重试，不消耗重试配额。
+	h.requeue(msg, jobMsg, jobMsg.Attempt, lease, "connection 被占用，已延迟重投", lg)
+}
+
+// settle 同步执行结束后的结果分流：Ack / 延迟重投 / 进 DLQ。
+func (h *Handler) settle(msg amqp.Delivery, jobMsg mq.JobMessage, leaseLost bool, runErr error, lg *slog.Logger) {
+	// 租约丢了，这次同步不可信（可能别的 Worker 已接管），进 DLQ
+	if leaseLost {
+		lg.Warn("租约丢失，进 DLQ")
+		msg.Nack(false, false)
+		return
+	}
+
+	if runErr == nil {
+		lg.Info("执行完成")
+		msg.Ack(false)
+		return
+	}
+
+	// 熔断：数据源冷却中，按冷却时长延迟重投
+	if errors.Is(runErr, circuitbreaker.ErrCircuitOpen) {
+		delay := circuitbreaker.DefaultConfig().OpenTimeout // 60s，与熔断冷却对齐
+		h.requeue(msg, jobMsg, jobMsg.Attempt+1, delay, "熔断中，冷却后重试", lg)
+		return
+	}
+
+	// 永久错误（数据源配置错）→ 直接 DLQ，重试无意义
+	if errors.Is(runErr, engine.ErrNonRetryable) {
+		lg.Error("永久失败，进 DLQ", "err", runErr)
+		msg.Nack(false, false)
+		return
+	}
+
+	// 重试次数到上限 → DLQ 放弃
+	if jobMsg.Attempt >= mq.MaxAttempts {
+		lg.Error("重试次数到上限，进 DLQ", "attempt", jobMsg.Attempt, "err", runErr)
+		msg.Nack(false, false)
+		return
+	}
+
+	// 可重试错误（网络/DB 抖动）→ 指数退避重投
+	delay := mq.BackoffDelay(jobMsg.Attempt)
+	h.requeue(msg, jobMsg, jobMsg.Attempt+1, delay, "执行失败，退避重试", lg)
+}
+
+// requeue 延迟重投的通用收尾：retryLater 成功则 Ack，失败则 Nack 进 DLQ。
+func (h *Handler) requeue(msg amqp.Delivery, jobMsg mq.JobMessage, attempt int, delay time.Duration, reason string, lg *slog.Logger) {
+	if err := h.retryLater(jobMsg, attempt, delay, reason); err != nil {
+		lg.Error("延迟重投失败", "reason", reason, "err", err)
+		msg.Nack(false, false)
+		return
+	}
+	lg.Info("已延迟重投", "reason", reason, "delay", delay.String(), "attempt", attempt)
 	msg.Ack(false)
+}
+
+// retryLater 把任务记为 pending 并写一条延迟 outbox 消息，两者在同一事务。
+// Dispatcher 扫到 outbox 记录后按 DelayMs 投递回 RabbitMQ。
+// 进度（total_count / cursor）总是以 DB 最新值为准，避免覆盖并发更新。
+func (h *Handler) retryLater(jobMsg mq.JobMessage, attempt int, delay time.Duration, reason string) error {
+	jobStore := repository.NewJobStore(h.db)
+
+	latest, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
+	if err != nil {
+		return fmt.Errorf("查询任务 %d 失败: %w", jobMsg.JobID, err)
+	}
+
+	payload, err := mq.MarshalOutboxPayload(jobMsg.JobID, jobMsg.TaskName, jobMsg.ConnectionID, attempt, delay.Milliseconds())
+	if err != nil {
+		return fmt.Errorf("构造 outbox payload 失败: %w", err)
+	}
+
+	tx, err := h.db.Begin(context.Background())
+	if err != nil {
+		return fmt.Errorf("开启事务失败: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if err := jobStore.UpdateStatusInTx(context.Background(), tx, jobMsg.JobID, model.JobStatusPending, latest.TotalCount, latest.Cursor, reason); err != nil {
+		return fmt.Errorf("记录 pending 失败: %w", err)
+	}
+	if err := h.outbox.Insert(context.Background(), tx, payload); err != nil {
+		return fmt.Errorf("写 outbox 失败: %w", err)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		return fmt.Errorf("提交事务失败: %w", err)
+	}
+	return nil
 }
 
 // runSync 组装数据源和目标端，并执行同步引擎。
 // ctx 会向下传给数据源、数据库、分页循环，Renew 失败 cancel 后能真正停下。
-func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
+func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage, lg *slog.Logger) error {
 	connectionStore := repository.NewConnectionStore(h.db)
 
 	syncedStore := repository.NewSyncedStore(h.db)
@@ -309,7 +260,7 @@ func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
 
 	// 轨道分流：数据库源走「原表镜像」，其余走「通用信封」（下方现状）。
 	if tableSrc, ok := src.(engine.TableSource); ok {
-		return h.runTableSync(ctx, jobMsg, job, tableSrc, connectionStore, jobStore)
+		return h.runTableSync(ctx, jobMsg, job, tableSrc, connectionStore, jobStore, lg)
 	}
 
 	// 熔断器：per-connectionID，状态存 Redis、跨 Worker 共享。
@@ -333,13 +284,13 @@ func (h *Handler) runSync(ctx context.Context, jobMsg mq.JobMessage) error {
 	defer func() { _ = dst.Close() }()
 	eng := engine.New(src, dst, 200)
 
-	log.Printf("[Worker] 开始执行 job_id=%d task_name=%s", jobMsg.JobID, jobMsg.TaskName)
+	lg.Info("开始执行同步")
 	return eng.Run(ctx, jobMsg.TaskName)
 }
 
 // runTableSync 数据库镜像轨道：读源表结构 → 目标库建同构表 → 列对列写入。
 // 与 runSync 剩余的信封路径平行，只处理「数据库源 → 数据库目标」。
-func (h *Handler) runTableSync(ctx context.Context, jobMsg mq.JobMessage, job *model.SyncJob, tableSrc engine.TableSource, connectionStore *repository.ConnectionStore, jobStore *repository.JobStore) error {
+func (h *Handler) runTableSync(ctx context.Context, jobMsg mq.JobMessage, job *model.SyncJob, tableSrc engine.TableSource, connectionStore *repository.ConnectionStore, jobStore *repository.JobStore, lg *slog.Logger) error {
 	// 决策点：数据库源必须有数据库目标，否则拒绝（镜像数据无处落表）。
 	if job.TargetConnectionID == nil || *job.TargetConnectionID == 0 {
 		return fmt.Errorf("数据库源必须指定数据库目标(target_connection_id): %w", engine.ErrNonRetryable)
@@ -359,16 +310,16 @@ func (h *Handler) runTableSync(ctx context.Context, jobMsg mq.JobMessage, job *m
 	src := circuitbreaker.WrapTable(tableSrc, breaker)
 
 	progress := repository.NewJobProgress(jobStore, jobMsg.JobID)
-	log.Printf("[Worker] 开始镜像同步 job_id=%d task_name=%s", jobMsg.JobID, jobMsg.TaskName)
+	lg.Info("开始镜像同步")
 	return engine.RunTable(ctx, src, tableDst, progress, jobMsg.TaskName, 200)
 }
 
 // unlock 用独立短超时 ctx 释放锁，不复用已经 cancel 掉的业务 ctx。
 // 失败只记录日志，不重跑任务；锁会靠 TTL 自动过期兜底。
-func (h *Handler) unlock(connectionID int, credential string) {
+func (h *Handler) unlock(connectionID int, credential string, lg *slog.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := h.connLock.Unlock(ctx, connectionID, credential); err != nil {
-		log.Printf("[Worker] Unlock 失败（靠 TTL 释放）: %v", err)
+		lg.Warn("Unlock 失败（靠 TTL 释放）", "err", err)
 	}
 }

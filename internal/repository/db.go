@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,7 +27,7 @@ func NewDB(ctx context.Context, databaseURL string) (*DB, error) {
 		pool.Close()
 		return nil, fmt.Errorf("pool.Ping: %w", err)
 	}
-	log.Println("postgres connected")
+	slog.Info("postgres connected")
 	return &DB{pool: pool}, nil
 }
 

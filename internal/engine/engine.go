@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 // Engine 同步引擎
@@ -92,6 +92,6 @@ func (e *Engine) Run(ctx context.Context, taskName string) error {
 		return fmt.Errorf("Complete is err: %w", err)
 	}
 	ok = true
-	log.Printf("同步完成: task=%s, total=%d", taskName, totalCount)
+	slog.Info("同步完成", "task", taskName, "total", totalCount)
 	return nil
 }

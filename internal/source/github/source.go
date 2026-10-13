@@ -32,9 +32,8 @@ type Source struct {
 	token      string       // GitHub Personal Access Token，从环境变量 GITHUB_TOKEN 读取，可选
 }
 
+// NewSource 创建 GitHub Source。
 /*
-NewSource 创建 GitHub Source。
-
 owner/repo 从 connections 表的 source_url 字段解析得到。
 source_url 的格式是 "owner/repo"，如 "torvalds/linux"、
 "golang/go"。
@@ -58,7 +57,6 @@ func (s *Source) Close() error { return nil }
 
 /*
 SourceError 包装 GitHub API 返回的 HTTP 错误状态码。
-
 它实现了 error 接口，Worker 那边用 errors.As 判断具体是哪种错误：
 */
 type SourceError struct {
@@ -129,10 +127,8 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 	}
 
 	// 第 6 步：把 HTTP 响应体解析成 Go 结构体切片
-
 	// GitHub 返回的是一个 JSON 数组：
 	//   [ {issue1}, {issue2}, {issue3}, ... ]
-	// json.NewDecoder(resp.Body).Decode(&issues)
 	//   - 流式解析：边读边解，不把整个 Body 一次性加载到内存
 	//   - 自动匹配 JSON 字段名 → 结构体字段的 json tag
 	var issues []gitHubIssue
@@ -144,16 +140,9 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 	//
 	records := make([]model.Record, 0, len(issues))
 	for _, issue := range issues {
-
 		// 7a. 过滤 Pull Request
-		// GitHub 的 Issue 和 PR 共享同一个编号。
-		// 比如 Issue #42 和 PR #42 不可能同时存在，它们共用编号空间。
-		// /issues 接口把 Issue 和 PR 一起返回。
-		//
-		// 区分方法：
-		//   - Issue: "pull_request" 字段是 null → Go 里解析为 nil
-		//   - PR:    "pull_request" 字段是 {}   → Go 里解析为非 nil 的指针
-		//
+		// GitHub 的 Issue 和 PR 共享同一个编号空间，/issues 接口把两者一起返回。
+		// 区分方法：Issue 的 "pull_request" 字段是 null（解析为 nil），PR 是 {}（非 nil 指针）。
 		// 所以 issue.PullRequest != nil → 这是 PR，跳过。
 		if issue.PullRequest != nil {
 			continue
@@ -162,10 +151,7 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		// 7b. 组装 Data（Issue 的业务信息，存到 JSONB）
 		// gitHubIssue 是全量的（字段和 API 返回值一一对应），
 		// gitHubIssueData 是精简的（只保留对账需要的字段）。
-		//
-		// 转换过程中：
-		//   - labels 从 []gitHubLabel 拍平成 []string（只要 name）
-		//   - body 截断到 500 字（避免 JSONB 撑爆）
+		// 转换中：labels 从 []gitHubLabel 拍平成 []string（只要 name），body 截断到 500 字。
 		issueData := gitHubIssueData{
 			Title:    issue.Title,
 			State:    issue.State,
@@ -182,15 +168,9 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 		// 7c. 构造 Record
 		// Record 是 engine.Source 接口要求返回的标准格式。
 		//
-		// 字段映射：
-		//   ID      = "issue_{number}"  如 issue_42
-		//   Version = updated_at.Unix() 秒级 Unix 时间戳
-		//   Data    = 上面组装的 issueData JSON
-		//
-		// Version 用秒级时间戳的原因：
-		//   GitHub 的 updated_at 精度是秒级，同一秒内两次更新的概率极低。
-		//   对账时如果版本一样内容不同 → CONTENT_MISMATCH（Hash 比较兜底）。
-		//
+		// 字段映射：ID = "issue_{number}"，Version = updated_at.Unix() 秒级时间戳。
+		// Version 用秒级的原因：GitHub 的 updated_at 精度是秒级，同秒两次更新概率极低；
+		// 版本一样但内容不同的情况，由对账的 Hash 比较（content_mismatch）兜底。
 		records = append(records, model.Record{
 			ID:        fmt.Sprintf("issue_%d", issue.Number),
 			Version:   int(issue.UpdatedAt.Unix()),
@@ -202,7 +182,6 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 	// 第 8 步：判断是否还有下一页 + 生成 nextCursor
 	//
 	// GitHub Issues API 不返回总数，只能靠"本页结果数 == limit"推测：
-	//
 	//   结果数 == limit → 可能还有下一页（最后一页恰好整除时会多一次空请求，无害）
 	//   结果数 <  limit → 绝对是最后一页
 	hasMore := len(issues) == limit
@@ -250,9 +229,8 @@ type gitHubIssue struct {
 	// 用 *struct{} 类型表示："我完全不关心里面是什么，只管是不是 nil"。
 	// nil = Issue，非 nil = PR。
 	//
-	// 为什么不用 *PullRequestDetail？
-	// 因为我们只做过滤不做解析，*struct{} 和 *PullRequestDetail 在 nil 判断上
-	// 完全一样，但 *struct{} 更省内存（空结构体 0 字节）。
+	// 为什么不用 *PullRequestDetail？因为只做过滤不做解析，*struct{} 和
+	// *PullRequestDetail 在 nil 判断上完全一样，但 *struct{} 更省内存（空结构体 0 字节）。
 	PullRequest *struct{} `json:"pull_request"`
 }
 
@@ -267,22 +245,10 @@ type gitHubLabel struct {
 }
 
 /*
-gitHubIssueData 是精簡後的 Issue 資料結構，存進 Record.Data（JSONB）。
-
-和 gitHubIssue 的區別：
-  - gitHubIssue：原樣接收 GitHub API 的完整 JSON，字段一一對應
-  - gitHubIssueData：只保留對賬需要的欄位，去掉網址/ID 等噪音，body 截斷
-
-存進 synced_records.data 的 JSON 大概長這樣：
-
-	{
-	  "title": "Kernel panic on boot",
-	  "state": "open",
-	  "user": "torvalds",
-	  "labels": ["bug", "high-priority"],
-	  "comments": 3,
-	  "body": "When I boot the kernel with CONFIG_X..."
-	}
+gitHubIssueData 是精简版的 Issue 结构，存入 Record.Data（JSONB）。
+和 gitHubIssue 的区别：
+  - gitHubIssue： GitHub API 的完整 JSON，
+  - gitHubIssueData：去掉地址/ID 等噪音，body 截断
 */
 type gitHubIssueData struct {
 	Title    string   `json:"title"`

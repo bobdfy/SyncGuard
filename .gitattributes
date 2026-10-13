@@ -1,0 +1,5 @@
+# 容器内执行的 shell 脚本必须 LF 行尾（CRLF 会导致 /bin/sh 报 $'\r': command not found）
+# 本机 core.autocrlf=true，必须用此规则覆盖
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf

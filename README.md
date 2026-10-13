@@ -97,48 +97,54 @@
 
 ## 快速开始
 
-### 前置要求
+### 方式 A：Docker 一键部署（推荐）
 
-- Go 1.26+
-- Docker（用于一键启动依赖；也可手动安装 PostgreSQL / RabbitMQ / Redis）
+前置：安装 Docker Desktop（Compose v2）+ 本机 Go 1.26+。
 
-### 1. 启动依赖
+1. 本机交叉编译两个 Linux 二进制：
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/syncguard-server ./cmd/server
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/syncguard-worker ./cmd/worker
 ```
 
-### 2. 初始化数据库
+2. 构建镜像并启动：
 
-按顺序把 `migrations/` 下两个 SQL 文件导入 PostgreSQL：
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+启动 PostgreSQL / RabbitMQ / Redis → 自动执行数据库迁移（带数据守卫，已有数据自动跳过）→ 启动 Server 与 Worker。打开 `http://localhost:9090`：注册账号 → 创建数据源（Mock / GitHub / PostgreSQL）→ 创建任务（目标端默认内部存储，可选外部 PostgreSQL 表）→ 启动 → 查看同步结果 / 对账。
+
+> 覆盖 JWT 密钥：`JWT_SECRET=你的密钥 docker compose -f deploy/docker-compose.yml up -d --build`。更多操作（日志 / 重启 / 重置 / 本地开发）见 [deploy/README.md](deploy/README.md)。
+
+### 方式 B：本地开发（go run）
+
+前置：Go 1.26+。
+
+1. 启动依赖（只起基础设施，不起应用容器，避免占用 9090）：
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d postgres rabbitmq redis
+```
+
+2. 初始化数据库（首次）：`docker compose -f deploy/docker-compose.yml up -d migrate`（带守卫，已存在数据自动跳过）；或手动按顺序导入 `migrations/` 下两个 SQL：
 
 | 文件 | 作用 |
 |------|------|
-| `001_init.sql` | 建齐业务表（users / connections / sync_jobs / synced_records），会先 DROP 旧表再重建 |
+| `001_init.sql` | 建齐业务表（users / connections / sync_jobs / synced_records） |
 | `002_outbox.sql` | 建 outbox 表 |
 
-### 3. 配置环境变量
+3. 配置环境变量：在项目根目录创建 `.env`（可参考下方[环境变量](#环境变量)表格）。
 
-在项目根目录创建 `.env`（可参考下方[环境变量](#环境变量)表格）：
-
-```bash
-DATABASE_URL=postgres://postgres:yourpass@localhost:5432/postgres?sslmode=disable
-RABBITMQ_URL=amqp://user:pass@localhost:5672/
-JWT_SECRET=please-change-me
-REDIS_ADDR=localhost:6379
-REDIS_PASS=
-```
-
-> `JWT_SECRET` 为必填，服务启动时校验，空值拒绝启动。
-
-### 4. 启动服务
+4. 启动服务：
 
 ```bash
 go run ./cmd/server   # HTTP 服务，默认 :9090
 go run ./cmd/worker   # 轮询 outbox + 消费队列执行同步
 ```
 
-打开 `http://localhost:9090`：注册账号 → 创建数据源（Mock / GitHub / PostgreSQL）→ 创建任务（目标端默认内部存储，可选外部 PostgreSQL 表）→ 启动 → 查看同步结果 / 对账。
+打开 `http://localhost:9090` 使用。
 
 ## 环境变量
 
@@ -256,7 +262,7 @@ go test ./...
 - [x] Outbox 模式（写库与发消息同事务，保证消息不丢）
 - [x] 目标表自动建表（镜像轨道：检测源表结构 → 目标库一键建同构表；信封轨道外部表仍需手动建）
 - [x] 两种轨道：源是数据库就镜像成原表结构（列对列、类型保真）；源是 API / 文档使用通用信封
-- [ ] 部署上云（Dockerfile + 容器化编排）
+- [x] 部署上云（Dockerfile + 容器化编排）
 - [ ] 更多数据源 / 目标端（MySQL、Kafka 等）
 
 ## License

@@ -2,35 +2,50 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/bobdfy/syncguard/internal/config"
 	"github.com/bobdfy/syncguard/internal/handler"
+	"github.com/bobdfy/syncguard/internal/logging"
 	"github.com/bobdfy/syncguard/internal/middleware"
 	"github.com/bobdfy/syncguard/internal/mq"
 	"github.com/bobdfy/syncguard/internal/reconciliation"
 	"github.com/bobdfy/syncguard/internal/repository"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"golang.org/x/time/rate"
 )
+
+// fatal 打一条结构化错误日志后以非零码退出（slog 没有 Fatal，自己包一层）。
+func fatal(msg string, args ...any) {
+	slog.Error(msg, args...)
+	os.Exit(1)
+}
 
 func main() {
 	godotenv.Load()
 
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL 未设置")
+	// 初始化结构化日志（放在 godotenv 之后，.env 里的 LOG_LEVEL 才能生效）
+	logging.Init()
+
+	cfg, err := config.Load(true, false)
+	if err != nil {
+		fatal(err.Error())
 	}
 
+	databaseURL := cfg.DatabaseURL
+
 	// JWT 签名密钥：从环境变量注入，杜绝硬编码。空值直接拒绝启动。
-	if err := middleware.SetJWTSecret(os.Getenv("JWT_SECRET")); err != nil {
-		log.Fatalf("JWT_SECRET: %v", err)
-	}
+	middleware.SetJWTSecret(cfg.JWTSecret)
 
 	db, err := repository.NewDB(context.Background(), databaseURL)
 	if err != nil {
-		log.Fatalf("数据库连接失败: %v", err)
+		fatal("数据库连接失败", "err", err)
 	}
 	defer db.Close()
 
@@ -43,17 +58,13 @@ func main() {
 	// 创建对账引擎
 	reconciler := reconciliation.NewReconciler(db, connStore)
 
-	// ========== 连接 RabbitMQ，创建 Producer ==========
-	// 从 .env 读取 RabbitMQ 地址
-	rabbitURL := os.Getenv("RABBITMQ_URL")
-	if rabbitURL == "" {
-		log.Fatal("RABBITMQ_URL 未设置")
-	}
+	// 连接 RabbitMQ，创建 Producer
+	rabbitURL := cfg.RabbitURL
 
 	// 拨号 + 声明拓扑（交换机、队列、死信队列）
 	conn, ch, err := mq.Connect(rabbitURL)
 	if err != nil {
-		log.Fatalf("RabbitMQ 连接失败: %v", err)
+		fatal("RabbitMQ 连接失败", "err", err)
 	}
 	defer conn.Close()
 	defer ch.Close()
@@ -69,9 +80,23 @@ func main() {
 
 	r := gin.Default()
 
+	// 不信任任何代理：ClientIP 只用 TCP 连接的 RemoteAddr。
+	// 否则客户端伪造一个 X-Forwarded-For 头就能换个 IP 桶，按 IP 的限流直接失效。
+	if err := r.SetTrustedProxies(nil); err != nil {
+		fatal("设置可信代理失败", "err", err)
+	}
+
+	// 根 ctx：进程退出时取消，所有带生命周期的组件（限流的清理 goroutine 等）随之停止
+	rootCtx, cancelRoot := context.WithCancel(context.Background())
+	defer cancelRoot()
+
+	// 登录/注册限流：每 12 秒补 1 个令牌（≈5 次/分钟），桶满可突发 5 次
+	loginLimiter := middleware.NewIPRateLimiter(rootCtx, rate.Every(12*time.Second), 5)
+	defer loginLimiter.Close()
+
 	// ========== 公开 API ==========
-	r.POST("/api/register", authHandler.Register)
-	r.POST("/api/login", authHandler.Login)
+	r.POST("/api/register", loginLimiter.Middleware(), authHandler.Register)
+	r.POST("/api/login", loginLimiter.Middleware(), authHandler.Login)
 
 	// ========== 需要认证的 API ==========
 	api := r.Group("/api")
@@ -102,21 +127,25 @@ func main() {
 	r.StaticFile("/", "./web/login.html")
 
 	// 读取端口（提到 goroutine 外，供日志打印使用）
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "9090"
-	}
+	port := cfg.Port
 
-	// 启动 HTTP 服务
+	srv := &http.Server{Addr: ":" + port, Handler: r}
 	go func() {
-		if err := r.Run(":" + port); err != nil {
-			log.Fatalf("服务启动失败: %v", err)
+		// 监听
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fatal("服务启动失败", "err", err)
 		}
 	}()
-	log.Printf("SyncGuard 已启动: http://localhost:%s", port)
 
+	// 带缓冲的通道
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
-	log.Println("正在关闭...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Warn("优雅退出超时，强制关闭", "err", err)
+	}
+	slog.Info("Server 已优雅退出")
 }

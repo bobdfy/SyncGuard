@@ -3,7 +3,7 @@ package redisclient
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -28,7 +28,7 @@ func NewClient(ctx context.Context, addr, password string) (*Client, error) {
 		return nil, fmt.Errorf("Ping redis error : %w", err)
 	}
 
-	log.Println("redis connected")
+	slog.Info("redis connected")
 	return &Client{client: client}, nil
 
 }

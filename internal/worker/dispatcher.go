@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/bobdfy/syncguard/internal/mq"
@@ -42,11 +42,11 @@ func (d *Dispatcher) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[Dispatcher] 已停止")
+			slog.Info("Dispatcher 已停止")
 			return
 		case <-ticker.C:
 			if err := d.processOnce(ctx); err != nil {
-				log.Printf("[Dispatcher] 扫描发送失败: %v", err)
+				slog.Error("Dispatcher 扫描发送失败", "err", err)
 			}
 		}
 	}
@@ -67,8 +67,8 @@ func (d *Dispatcher) processOnce(ctx context.Context) error {
 		var p mq.OutboxPayload
 		// a. json.Unmarshal 解析出 mq.OutboxPayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {
-			log.Printf("[Dispatcher] 解析 outbox 消息 %d 失败: %v", msg.ID, err)
-			continue //解析失败，等待人工处理
+			slog.Error("Dispatcher 解析 outbox 消息失败，等待人工处理", "outbox_id", msg.ID, "err", err)
+			continue
 		}
 		// b. DelayMs==0 → producer.Publish(...)；否则 producer.PublishDelayed(..., DelayMs 毫秒)
 		var sendErr error
@@ -82,14 +82,13 @@ func (d *Dispatcher) processOnce(ctx context.Context) error {
 
 		if sendErr != nil {
 			//发送失败: 不标sent，下一轮重试
-			log.Printf("[Dispatcher] 发送 outbox 消息 %d 失败: %v", msg.ID, sendErr)
+			slog.Warn("Dispatcher 发送 outbox 消息失败，下轮重试", "outbox_id", msg.ID, "job_id", p.JobID, "err", sendErr)
 			continue
 		}
 		if err := d.store.MarkSent(ctx, msg.ID); err != nil {
-			log.Printf("[Dispatcher] 标记 outbox 消息 %d 失败: %v", msg.ID, err)
 			// 标记失败也继续：消息可能已发出但没标上，下轮会重发（at-least-once，靠幂等兜底）
+			slog.Warn("Dispatcher 标记 outbox 消息失败", "outbox_id", msg.ID, "job_id", p.JobID, "err", err)
 			continue
-
 		}
 	}
 	return nil

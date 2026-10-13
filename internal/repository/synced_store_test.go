@@ -12,10 +12,10 @@ import (
 
 // 测试专用 userID / connectionID，避免污染真实数据。
 const (
-	testUserID       = 9990001
-	testConnID       = 777
-	testOtherConnID  = 778
-	testOtherUserID  = 9990002
+	testUserID      = 9990001
+	testConnID      = 777
+	testOtherConnID = 778
+	testOtherUserID = 9990002
 )
 
 func testRecord(id string, version int, data string) model.Record {

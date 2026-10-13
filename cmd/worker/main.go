@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
+	"syscall"
 
+	"github.com/bobdfy/syncguard/internal/config"
 	"github.com/bobdfy/syncguard/internal/lock"
+	"github.com/bobdfy/syncguard/internal/logging"
 	"github.com/bobdfy/syncguard/internal/mq"
 	"github.com/bobdfy/syncguard/internal/redisclient"
 	"github.com/bobdfy/syncguard/internal/repository"
@@ -14,48 +17,53 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// fatal 打一条结构化错误日志后以非零码退出（slog 没有 Fatal，自己包一层）。
+func fatal(msg string, args ...any) {
+	slog.Error(msg, args...)
+	os.Exit(1)
+}
+
 func main() {
 	// 加载 .env
 	godotenv.Load()
 
-	// 读取数据库地址
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL 未设置")
+	// 初始化结构化日志（放在 godotenv 之后，.env 里的 LOG_LEVEL 才能生效）
+	logging.Init()
+
+	cfg, err := config.Load(false, true)
+	if err != nil {
+		fatal(err.Error())
 	}
+
+	// 读取数据库地址
+	databaseURL := cfg.DatabaseURL
 
 	// 连接 PostgreSQL
 	db, err := repository.NewDB(context.Background(), databaseURL)
 	if err != nil {
-		log.Fatalf("数据库连接失败: %v", err)
+		fatal("数据库连接失败", "err", err)
 	}
 	defer db.Close()
 
 	//读取 RabbitMQ 连接地址
-	rabbitURL := os.Getenv("RABBITMQ_URL")
-	if rabbitURL == "" {
-		log.Fatal("RABBITMQ_URL 未设置")
-	}
+	rabbitURL := cfg.RabbitURL
 
 	// 连接 RabbitMQ
 	conn, ch, err := mq.Connect(rabbitURL)
 	if err != nil {
-		log.Fatalf("RabbitMQ 连接失败: %v", err)
+		fatal("RabbitMQ 连接失败", "err", err)
 	}
 	defer conn.Close()
 	defer ch.Close()
 
 	// 读取 Redis 地址
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		log.Fatal("REDIS_ADDR 未设置")
-	}
-	redisPass := os.Getenv("REDIS_PASS")
+	redisAddr := cfg.RedisAddr
+	redisPass := cfg.RedisPass
 
 	// 连接 Redis，创建连接级分布式锁
 	rdb, err := redisclient.NewClient(context.Background(), redisAddr, redisPass)
 	if err != nil {
-		log.Fatalf("Redis 连接失败: %v", err)
+		fatal("Redis 连接失败", "err", err)
 	}
 	defer rdb.Close()
 
@@ -65,14 +73,14 @@ func main() {
 	// 为延迟重投单独开一个发布 channel，并开启 publisher confirm
 	publishCh, err := conn.Channel()
 	if err != nil {
-		log.Fatalf("创建发布 channel 失败: %v", err)
+		fatal("创建发布 channel 失败", "err", err)
 	}
 	defer publishCh.Close() //延迟关闭
 
 	// 确保消息被 Broker 成功接收后才返回 ACK
 	// false 表示不需要同步等待所有确认，性能较好
 	if err := publishCh.Confirm(false); err != nil {
-		log.Fatalf("开启 publisher confirm 失败: %v", err)
+		fatal("开启 publisher confirm 失败", "err", err)
 	}
 
 	// 创建生产者实例，指定交换器、路由键（这些常量在 mq 包中定义）
@@ -81,13 +89,13 @@ func main() {
 	// 创建 Consumer（内部设 Qos(prefetch=1)，一次只取一条）
 	consumer, err := mq.NewConsumer(ch, mq.QueueName)
 	if err != nil {
-		log.Fatalf("创建 Consumer 失败: %v", err)
+		fatal("创建 Consumer 失败", "err", err)
 	}
 
 	// 订阅队列，拿到消息 channel
 	msgs, err := consumer.Consume()
 	if err != nil {
-		log.Fatalf("订阅队列失败: %v", err)
+		fatal("订阅队列失败", "err", err)
 	}
 
 	//组装outbox搬运工：扫描outbox未发送的信息 --> 发送到RabbitMQ
@@ -101,7 +109,7 @@ func main() {
 	// 创建 worker.Handler，负责处理从队列中消费到的每条消息（即执行任务）
 	h := worker.New(db, connLock, rdb, outboxStore)
 
-	log.Println("Worker 已启动，等待消息...")
+	slog.Info("Worker 已启动，等待消息...")
 
 	//启动搬运工：独立ctx， worker退出时一并取消
 	dispatcherCtx, cancelDispatcher := context.WithCancel(context.Background())
@@ -112,18 +120,18 @@ func main() {
 
 	// 优雅退出：Ctrl+C 时退出循环
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	// 消息循环：阻塞等待消息或退出信号
 	for {
 		select {
 		case <-quit:
-			log.Println("正在关闭 Worker...")
+			slog.Info("正在关闭 Worker...")
 			return
 
 		case msg, ok := <-msgs:
 			if !ok {
-				log.Println("消息 channel 已关闭")
+				slog.Warn("消息 channel 已关闭")
 				return
 			}
 			h.Handle(msg)

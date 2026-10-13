@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -106,4 +108,81 @@ func TestAuthRequired(t *testing.T) {
 			t.Errorf("期望注入 userID=7 username=bob，实际返回: %s", body)
 		}
 	})
+}
+
+// TestTokenExpiry 验证过期机制的三个层次：
+// 签发时带上 24h 过期时间 → 过期 token 被解析层拒绝 → 中间件返回 401 和"重新登录"提示。
+func TestTokenExpiry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	if err := SetJWTSecret("test-secret"); err != nil {
+		t.Fatalf("设置密钥失败: %v", err)
+	}
+
+	t.Run("签发的 token 带 24h 过期时间", func(t *testing.T) {
+		tokenString, err := GenerateToken(1, "u")
+		if err != nil {
+			t.Fatalf("GenerateToken 报错: %v", err)
+		}
+		claims := &Claims{}
+		if _, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
+			return jwtSecret, nil
+		}); err != nil {
+			t.Fatalf("解析失败: %v", err)
+		}
+		// 允许 1 分钟的执行耗时误差
+		want := time.Now().Add(tokenTTL)
+		if claims.ExpiresAt == nil ||
+			claims.ExpiresAt.Time.Before(want.Add(-time.Minute)) ||
+			claims.ExpiresAt.Time.After(want.Add(time.Minute)) {
+			t.Errorf("过期时间不对: 期望约 %v，实际 %v", want, claims.ExpiresAt)
+		}
+	})
+
+	t.Run("过期 token 被解析层拒绝", func(t *testing.T) {
+		expired := signExpiredToken(t)
+		_, err := jwt.ParseWithClaims(expired, &Claims{}, func(t *jwt.Token) (any, error) {
+			return jwtSecret, nil
+		})
+		if !errors.Is(err, jwt.ErrTokenExpired) {
+			t.Fatalf("期望 ErrTokenExpired，实际: %v", err)
+		}
+	})
+
+	t.Run("过期 token 被中间件拒绝并提示重新登录", func(t *testing.T) {
+		router := gin.New()
+		router.GET("/protected", AuthRequired(), func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+		req.Header.Set("Authorization", "Bearer "+signExpiredToken(t))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("期望 401，实际 %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "登录已过期") {
+			t.Errorf("期望提示重新登录，实际返回: %s", w.Body.String())
+		}
+	})
+}
+
+// signExpiredToken 构造一个 1 分钟前就已经过期的 token。
+// 测试时间相关逻辑的技巧：不"等时间过去"，而是"构造一个过去的时间"。
+func signExpiredToken(t *testing.T) string {
+	t.Helper()
+	claims := &Claims{
+		UserID:   1,
+		Username: "u",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		},
+	}
+	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
+	if err != nil {
+		t.Fatalf("构造过期 token 失败: %v", err)
+	}
+	return tokenString
 }

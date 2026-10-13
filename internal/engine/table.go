@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/bobdfy/syncguard/internal/model"
 )
@@ -109,6 +109,6 @@ func RunTable(ctx context.Context, src TableSource, dst TableDestination, progre
 		return fmt.Errorf("CompleteBatch: %w", err)
 	}
 	ok = true
-	log.Printf("镜像同步完成: task=%s, total=%d", taskName, totalCount)
+	slog.Info("镜像同步完成", "task", taskName, "total", totalCount)
 	return nil
 }

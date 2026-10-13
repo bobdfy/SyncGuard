@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -230,7 +230,7 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 	}
 
 	// ========== 5. 打日志 ==========
-	log.Printf("任务 %d 已投递到 MQ", id)
+	slog.Info("任务已投递到 MQ", "job_id", id)
 	c.JSON(http.StatusOK, gin.H{"data": "任务已发送"})
 }
 

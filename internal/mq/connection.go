@@ -2,7 +2,7 @@ package mq
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -10,9 +10,6 @@ import (
 // 消息链路：
 //
 //	Producer → Exchange(syncguard.jobs) → Queue(syncguard.jobs.queue) → Worker
-//
-//	处理失败：Nack(requeue=false) → DLX → DLQ（死信）
-//	抢锁失败：延迟队列(retry) 的 DLX 指向主交换机，消息 TTL 过期后回主队列重试
 const (
 	ExchangeName = "syncguard.jobs"       // 主交换机
 	QueueName    = "syncguard.jobs.queue" // 主队列
@@ -20,12 +17,15 @@ const (
 	DLQName      = "syncguard.jobs.dlq"   // 死信队列
 
 	// RetryQueueName 延迟重试队列。抢锁失败（新触发）的消息带 Expiration(TTL)
-	// 发到这里，到期成为死信，被 x-dead-letter-exchange 转发回主交换机 → 重新进入主队列。
-	// 注意：这里的 DLX 指向主交换机，不是死信 DLX。
 	RetryQueueName = "syncguard.jobs.retry"
 
 	// RoutingKey：direct 交换机下 RoutingKey==BindingKey 才投递。
 	RoutingKey = "job.run"
+
+	// CDC 专用通道
+	CDCExchangeName = "syncguard.cdc"
+	CDCQueueName    = "syncguard.cdc.queue"
+	CDCRoutingKey   = "cdc.change"
 )
 
 // declareTopology 声明 Exchange/Queue/Binding，确保运行前拓扑存在。
@@ -125,8 +125,24 @@ func declareTopology(ch *amqp.Channel) error {
 		return fmt.Errorf("声明延迟队列: %w", err)
 	}
 
-	log.Println("[MQ] RabbitMQ 拓扑声明完成")
+	// CDC 交换机
+	if err := ch.ExchangeDeclare(CDCExchangeName, "direct", true, false, false, false, nil); err != nil {
+		return fmt.Errorf("声明 CDC 交换机失败: %w", err)
+	}
+
+	// CDC 队列
+	if _, err := ch.QueueDeclare(CDCQueueName, true, false, false, false, nil); err != nil {
+		return fmt.Errorf("声明 CDC 队列失败: %w", err)
+	}
+
+	// CDC 交换机 -> 队列绑定
+	if err := ch.QueueBind(CDCQueueName, CDCRoutingKey, CDCExchangeName, false, nil); err != nil {
+		return fmt.Errorf("绑定 CDC 队列: %w", err)
+	}
+
+	slog.Info("RabbitMQ 拓扑声明完成")
 	return nil
+
 }
 
 // Connect 建立 Connection 和 Channel，并声明拓扑。
@@ -151,6 +167,6 @@ func Connect(url string) (*amqp.Connection, *amqp.Channel, error) {
 		return nil, nil, fmt.Errorf("声明拓扑失败: %w", err)
 	}
 
-	log.Println("[MQ] RabbitMQ 已连接")
+	slog.Info("RabbitMQ 已连接")
 	return conn, ch, nil
 }
