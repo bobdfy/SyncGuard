@@ -11,11 +11,18 @@ import (
 
 // 一条解析后的数据变更事件
 type Event struct {
-	LSN       string        `json:"lsn"`
-	Operation string        `json:"operation"`
-	Schema    string        `json:"schema"`
-	Table     string        `json:"table"`
-	Columns   []ColumnValue `json:"columns"`
+	// LSN 是该事件在源库日志中的唯一位置标识
+	LSN string `json:"lsn"`
+
+	// Operation 是变更类型
+	Operation string `json:"operation"`
+
+	// Schema 是变更所属的数据库名
+	Schema string `json:"schema"`
+
+	Table string `json:"table"`
+
+	Columns []ColumnValue `json:"columns"`
 }
 
 // 一列的值

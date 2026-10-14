@@ -26,6 +26,11 @@ const (
 	CDCExchangeName = "syncguard.cdc"
 	CDCQueueName    = "syncguard.cdc.queue"
 	CDCRoutingKey   = "cdc.change"
+
+	// CDC 死信：应用失败的 CDC 事件落到这里，不丢
+	CDCDLXExchangeName = "syncguard.cdc.dlx"
+	CDCDLQQueueName    = "syncguard.cdc.dlq"
+	CDCDLQRoutingKey   = "cdc.dlq"
 )
 
 // declareTopology 声明 Exchange/Queue/Binding，确保运行前拓扑存在。
@@ -130,8 +135,23 @@ func declareTopology(ch *amqp.Channel) error {
 		return fmt.Errorf("声明 CDC 交换机失败: %w", err)
 	}
 
-	// CDC 队列
-	if _, err := ch.QueueDeclare(CDCQueueName, true, false, false, false, nil); err != nil {
+	// CDC 死信交换机 + 死信队列（终态，应用失败的消息最终落在这里）
+	if err := ch.ExchangeDeclare(CDCDLXExchangeName, "direct", true, false, false, false, nil); err != nil {
+		return fmt.Errorf("声明 CDC 死信交换机失败: %w", err)
+	}
+	if _, err := ch.QueueDeclare(CDCDLQQueueName, true, false, false, false, nil); err != nil {
+		return fmt.Errorf("声明 CDC 死信队列失败: %w", err)
+	}
+	if err := ch.QueueBind(CDCDLQQueueName, CDCDLQRoutingKey, CDCDLXExchangeName, false, nil); err != nil {
+		return fmt.Errorf("绑定 CDC 死信队列: %w", err)
+	}
+
+	// CDC 队列，配置死信：Nack(requeue=false) 的消息进 CDC 死信交换机
+	cdcQueueArgs := amqp.Table{
+		"x-dead-letter-exchange":    CDCDLXExchangeName,
+		"x-dead-letter-routing-key": CDCDLQRoutingKey,
+	}
+	if _, err := ch.QueueDeclare(CDCQueueName, true, false, false, false, cdcQueueArgs); err != nil {
 		return fmt.Errorf("声明 CDC 队列失败: %w", err)
 	}
 
@@ -147,8 +167,7 @@ func declareTopology(ch *amqp.Channel) error {
 
 // Connect 建立 Connection 和 Channel，并声明拓扑。
 //
-// Connection = 一条 TCP 连接（复用少量）；Channel = 其上的逻辑通道（实际收发消息都走它）。
-// 调用方退出时需 ch.Close()、conn.Close()；任一步失败会关闭已创建的资源，避免泄漏。
+// Connection = 一条 TCP 连接（复用少量）；Channel = 其上的逻辑通道（实际收发消息都走它）。任一步失败会关闭已创建的资源，避免泄漏。
 func Connect(url string) (*amqp.Connection, *amqp.Channel, error) {
 	conn, err := amqp.Dial(url)
 	if err != nil {

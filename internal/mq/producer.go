@@ -12,7 +12,6 @@ import (
 )
 
 // Producer 消息生产者，把任务序列化成 JSON 发到 RabbitMQ。
-// 只负责「发出去」，不关心 Worker 最后是否执行成功。
 type Producer struct {
 	channel    *amqp.Channel // 发送消息用的 Channel
 	exchange   string        // 发到哪个 Exchange
@@ -97,7 +96,6 @@ func (p *Producer) PublishDelayed(ctx context.Context, jobID int, taskName strin
 	}
 
 	// slog.Duration：Duration 是 int64 纳秒，直接当字段会输出成一串数字，
-	// 用 slog.Duration 才渲染成 "5s" / "1m20s" 这种可读形式。
 	slog.Info("已延迟发布", "job_id", jobID, "task", taskName, slog.Duration("delay", delay))
 	return nil
 }
@@ -111,6 +109,26 @@ func (p *Producer) PublishRaw(ctx context.Context, body []byte) error {
 	}
 	if err := p.channel.PublishWithContext(ctx, p.exchange, p.routingKey, false, false, pub); err != nil {
 		return fmt.Errorf("发布原始消息失败: %w", err)
+	}
+	return nil
+}
+
+// 保证 Broker 能确认接收
+// 返回 nil 才代表消息已到 Broker，调用方据此推进 processed_at
+func (p *Producer) PublishRawConfirmed(ctx context.Context, body []byte) error {
+	pub := amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		Body:         body,
+	}
+	deferred, err := p.channel.PublishWithDeferredConfirmWithContext(ctx, p.exchange, p.routingKey, false, false, pub)
+	if err != nil {
+		return fmt.Errorf("发布原始消息失败: %w", err)
+	}
+	// 等 Broker 确认。err != nil = 超时/取消没等到，!acked = 被 nack。
+	acked, err := deferred.WaitContext(ctx)
+	if err != nil || !acked {
+		return fmt.Errorf("原始消息未被 RabbitMQ 确认: %v", err)
 	}
 	return nil
 }

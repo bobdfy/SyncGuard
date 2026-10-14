@@ -239,7 +239,7 @@ func coerceValue(oid uint32, v any) (any, error) {
 		}
 		text = b
 	default:
-		text = []byte(fmt.Sprint(v))
+		text = fmt.Append(nil, v)
 	}
 
 	typ, ok := typeMap.TypeForOID(oid)

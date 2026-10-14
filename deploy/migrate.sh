@@ -30,6 +30,8 @@ apply_if_missing() {
 
 apply_if_missing users 001_init.sql
 apply_if_missing outbox 002_outbox.sql
+apply_if_missing documents 003_cdc.sql
+apply_if_missing cdc_events 004_cdc_events.sql
 # 新增迁移：apply_if_missing <该迁移建的表> <新文件.sql>
 
 echo "[migrate] 迁移检查完成"
