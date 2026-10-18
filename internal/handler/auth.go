@@ -66,7 +66,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// 6. 返回 token 和 username 给前端
 	//    前端收到后存 localStorage，后续请求带在 Authorization header 里
-	c.JSON(http.StatusCreated, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"token":    token,
 		"username": user.UserName,
 	})

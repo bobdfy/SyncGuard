@@ -78,6 +78,8 @@ func (s *Source) Fetch(ctx context.Context, cursor string, limit int) ([]model.R
 	}
 
 	// 第 2 步：拼接 GitHub Issues API 的 URL
+	//
+	// 已知 trade-off：sort=updated 按页码分页，同步过程中 issue 被更新会换页位
 	url := fmt.Sprintf(
 		"https://api.github.com/repos/%s/%s/issues?state=all&sort=updated&direction=asc&per_page=%d&page=%d",
 		s.owner, s.repo, limit, page,
@@ -271,9 +273,11 @@ func makeLabels(labels []gitHubLabel) []string {
 }
 
 // truncate 截断字串，超过 maxLen 的部分用 "..." 替换。
+// 按 rune 截断而非字节：直接 s[:maxLen] 可能把多字节 UTF-8 字符（中文/emoji）切成两半。
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	r := []rune(s)
+	if len(r) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(r[:maxLen]) + "..."
 }

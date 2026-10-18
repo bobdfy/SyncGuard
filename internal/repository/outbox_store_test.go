@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -33,7 +35,7 @@ func TestOutboxStoreRoundTrip(t *testing.T) {
 	// 清理：测试前后都清空，避免历史数据干扰
 	_, err := db.Pool().Exec(ctx, `DELETE FROM outbox`)
 	if err != nil {
-		t.Fatalf("清理 outbox 表失败（确认已执行迁移 002_outbox.sql）: %v", err)
+		t.Fatalf("清理 outbox 表失败（确认已执行迁移 001_platform.sql）: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool().Exec(context.Background(), `DELETE FROM outbox`)
@@ -63,7 +65,15 @@ func TestOutboxStoreRoundTrip(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("期望 1 条未发送消息，实际 %d 条", len(msgs))
 	}
-	if string(msgs[0].Payload) != string(payload) {
+	// outbox payload 是 jsonb：读回会被 PG 规范化（加空格/重排键），不能按字符串相等比较。
+	var gotPayload, wantPayload any
+	if err := json.Unmarshal(msgs[0].Payload, &gotPayload); err != nil {
+		t.Fatalf("解析实际 payload 失败: %v", err)
+	}
+	if err := json.Unmarshal(payload, &wantPayload); err != nil {
+		t.Fatalf("解析期望 payload 失败: %v", err)
+	}
+	if !reflect.DeepEqual(gotPayload, wantPayload) {
 		t.Errorf("payload 不一致: 期望 %s，实际 %s", payload, msgs[0].Payload)
 	}
 

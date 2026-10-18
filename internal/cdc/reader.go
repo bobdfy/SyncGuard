@@ -244,7 +244,21 @@ func (r *Reader) buildEvent(op string, lsn pglogrepl.LSN, relID uint32, tuple *p
 		Schema:    rel.Namespace,
 		Table:     rel.RelationName,
 		Columns:   tupleToColumns(rel, tuple),
+		Relation:  relationFromMessage(rel),
 	}, true
+}
+
+// relationFromMessage 把 pgoutput 的表结构消息精简成建表所需元数据。
+func relationFromMessage(rel *pglogrepl.RelationMessage) *Relation {
+	cols := make([]RelationColumn, 0, len(rel.Columns))
+	for _, c := range rel.Columns {
+		cols = append(cols, RelationColumn{
+			Name:    c.Name,
+			TypeOID: c.DataType,
+			IsKey:   c.Flags&1 != 0, // 1 = 该列是 replica identity（键）的一部分
+		})
+	}
+	return &Relation{Columns: cols}
 }
 
 func querySlotLSN(ctx context.Context, dsn, slotName string) (pglogrepl.LSN, bool, error) {

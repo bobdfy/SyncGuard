@@ -18,6 +18,7 @@ import (
 	"github.com/bobdfy/syncguard/internal/redisclient"
 	"github.com/bobdfy/syncguard/internal/repository"
 	"github.com/bobdfy/syncguard/internal/source"
+	"github.com/jackc/pgx/v5"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -66,8 +67,16 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 	jobStore := repository.NewJobStore(h.db)
 	job, err := jobStore.GetByID(context.Background(), jobMsg.JobID)
 	if err != nil {
-		lg.Error("查询任务失败", "err", err)
-		msg.Nack(false, false)
+		// 任务已被删除（不是 DB 抖动）：消息失去意义，直接丢弃。
+		// 若走 retryInfra → retryLater 内部又 GetByID 失败 → 原地重排 → 无限自旋刷日志。
+		if errors.Is(err, pgx.ErrNoRows) {
+			lg.Warn("任务已删除，丢弃消息")
+			msg.Ack(false)
+			return
+		}
+		// DB 抖动：退避重投而非进 DLQ（只有业务性失败才进 DLQ）。
+		lg.Error("查询任务失败(DB 抖动)，退避重投", "err", err)
+		h.retryInfra(msg, jobMsg, "查询任务失败(DB 抖动)", lg)
 		return
 	}
 	if job.Status == model.JobStatusCompleted {
@@ -79,9 +88,9 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 	// 3. 抢锁
 	credential, acquired, err := h.connLock.Lock(context.Background(), jobMsg.ConnectionID, jobMsg.JobID, lease)
 	if err != nil {
-		// Redis/锁系统异常，任务无法执行，进 DLQ 等后续重试
-		lg.Error("抢锁失败(Redis 异常)", "err", err)
-		msg.Nack(false, false)
+		// Redis 抖动：退避重投而非进 DLQ（只有业务性失败才进 DLQ）。
+		lg.Error("抢锁失败(Redis 异常)，退避重投", "err", err)
+		h.retryInfra(msg, jobMsg, "抢锁失败(Redis 异常)", lg)
 		return
 	}
 	if !acquired {
@@ -138,9 +147,9 @@ func (h *Handler) Handle(msg amqp.Delivery) {
 func (h *Handler) handleLockBusy(msg amqp.Delivery, jobMsg mq.JobMessage, lg *slog.Logger) {
 	owner, found, err := h.connLock.Owner(context.Background(), jobMsg.ConnectionID)
 	if err != nil {
-		// Redis 查询失败，无法判断，保守进 DLQ
-		lg.Error("查询锁持有者失败", "err", err)
-		msg.Nack(false, false)
+		// Redis 抖动：无法判断持锁者，退避重投而非进 DLQ。
+		lg.Error("查询锁持有者失败(Redis 异常)，退避重投", "err", err)
+		h.retryInfra(msg, jobMsg, "查询锁持有者失败", lg)
 		return
 	}
 	if found && owner == jobMsg.JobID {
@@ -152,6 +161,27 @@ func (h *Handler) handleLockBusy(msg amqp.Delivery, jobMsg mq.JobMessage, lg *sl
 
 	// 新触发：attempt 不递增——这不是失败重试，不消耗重试配额。
 	h.requeue(msg, jobMsg, jobMsg.Attempt, lease, "connection 被占用，已延迟重投", lg)
+}
+
+// retryInfra 基础设施（DB/Redis）抖动的退避重投：与 settle 的可重试分支一致，
+// 到 MaxAttempts 才放弃进 DLQ。优先走 outbox 延迟重投；若 DB 也不可用（outbox 依赖 DB），
+// 退化为原地重排 Nack(requeue)，交给 MQ 在基础设施恢复后重投，不丢消息。
+func (h *Handler) retryInfra(msg amqp.Delivery, jobMsg mq.JobMessage, reason string, lg *slog.Logger) {
+	if jobMsg.Attempt+1 >= mq.MaxAttempts {
+		lg.Error("基础设施异常重试到上限，进 DLQ", "reason", reason, "attempt", jobMsg.Attempt)
+		msg.Nack(false, false)
+		return
+	}
+	delay := mq.BackoffDelay(jobMsg.Attempt)
+	if err := h.retryLater(jobMsg, jobMsg.Attempt+1, delay, reason); err != nil {
+		// DB 不可用，outbox 写不进去：原地重排 + 短睡眠节流，避免 tight loop。
+		lg.Warn("延迟重投失败，原地重排", "reason", reason, "err", err)
+		time.Sleep(time.Second)
+		msg.Nack(false, true)
+		return
+	}
+	lg.Info("已延迟重投", "reason", reason, "delay", delay.String(), "attempt", jobMsg.Attempt+1)
+	msg.Ack(false)
 }
 
 // settle 同步执行结束后的结果分流：Ack / 延迟重投 / 进 DLQ。
@@ -184,7 +214,7 @@ func (h *Handler) settle(msg amqp.Delivery, jobMsg mq.JobMessage, leaseLost bool
 	}
 
 	// 重试次数到上限 → DLQ 放弃
-	if jobMsg.Attempt >= mq.MaxAttempts {
+	if jobMsg.Attempt+1 >= mq.MaxAttempts {
 		lg.Error("重试次数到上限，进 DLQ", "attempt", jobMsg.Attempt, "err", runErr)
 		msg.Nack(false, false)
 		return

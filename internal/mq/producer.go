@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -77,13 +76,13 @@ func (p *Producer) PublishDelayed(ctx context.Context, jobID int, taskName strin
 	pub := amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
-		Expiration:   strconv.FormatInt(delay.Milliseconds(), 10), // 消息级 TTL（毫秒）
 		Body:         body,
 	}
 
-	// 发到延迟队列：默认 exchange("") + routing key=队列名，直发队列
+	// 投到与延迟匹配的档位队列（队列级固定 x-message-ttl），到期后死信回主队列。
+	// 不再用消息级 Expiration——那在单队列里只在队头生效，会队头阻塞。
 	deferred, err := p.channel.PublishWithDeferredConfirmWithContext(
-		ctx, "", RetryQueueName, false, false, pub,
+		ctx, "", retryQueueName(delay), false, false, pub,
 	) //默认交换机 + 直发
 	if err != nil {
 		return fmt.Errorf("发布延迟消息失败: %w", err)

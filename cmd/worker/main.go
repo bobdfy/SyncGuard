@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -30,38 +31,41 @@ func main() {
 	// 初始化结构化日志（放在 godotenv 之后，.env 里的 LOG_LEVEL 才能生效）
 	logging.Init()
 
+	replay := flag.Bool("replay", false, "一次性补投：把 jobs 死信队列的消息发回主队列后退出")
+	flag.Parse()
+
 	cfg, err := config.Load(false, true)
 	if err != nil {
 		fatal(err.Error())
 	}
 
-	// 读取数据库地址
-	databaseURL := cfg.DatabaseURL
-
-	// 连接 PostgreSQL
-	db, err := repository.NewDB(context.Background(), databaseURL)
-	if err != nil {
-		fatal("数据库连接失败", "err", err)
-	}
-	defer db.Close()
-
-	//读取 RabbitMQ 连接地址
-	rabbitURL := cfg.RabbitURL
-
-	// 连接 RabbitMQ
-	conn, ch, err := mq.Connect(rabbitURL)
+	// 连接 RabbitMQ（放最前：-replay 只走死信队列，不依赖 DB/Redis）
+	conn, ch, err := mq.Connect(cfg.RabbitURL)
 	if err != nil {
 		fatal("RabbitMQ 连接失败", "err", err)
 	}
 	defer conn.Close()
 	defer ch.Close()
 
-	// 读取 Redis 地址
-	redisAddr := cfg.RedisAddr
-	redisPass := cfg.RedisPass
+	// 一次性补投：只走死信队列，不需要 DB/Redis
+	if *replay {
+		n, err := worker.ReplayJobs(ch)
+		if err != nil {
+			fatal("补投失败", "err", err)
+		}
+		slog.Info("补投完成", "total", n)
+		return
+	}
+
+	// 连接 PostgreSQL
+	db, err := repository.NewDB(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		fatal("数据库连接失败", "err", err)
+	}
+	defer db.Close()
 
 	// 连接 Redis，创建连接级分布式锁
-	rdb, err := redisclient.NewClient(context.Background(), redisAddr, redisPass)
+	rdb, err := redisclient.NewClient(context.Background(), cfg.RedisAddr, cfg.RedisPass)
 	if err != nil {
 		fatal("Redis 连接失败", "err", err)
 	}

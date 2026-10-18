@@ -3,6 +3,8 @@ package mq
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -15,9 +17,6 @@ const (
 	QueueName    = "syncguard.jobs.queue" // 主队列
 	DLXName      = "syncguard.jobs.dlx"   // 死信交换机
 	DLQName      = "syncguard.jobs.dlq"   // 死信队列
-
-	// RetryQueueName 延迟重试队列。抢锁失败（新触发）的消息带 Expiration(TTL)
-	RetryQueueName = "syncguard.jobs.retry"
 
 	// RoutingKey：direct 交换机下 RoutingKey==BindingKey 才投递。
 	RoutingKey = "job.run"
@@ -32,6 +31,32 @@ const (
 	CDCDLQQueueName    = "syncguard.cdc.dlq"
 	CDCDLQRoutingKey   = "cdc.dlq"
 )
+
+// retryTiers 延迟重试档位（从小到大）。每个档位一个固定 x-message-ttl 的队列，
+// 用队列级 TTL 替代消息级 Expiration：RabbitMQ 只在队头检查消息级 TTL，单队列会队头阻塞。
+// 最大档位覆盖 backoffMax(2min)+抖动(~3min)，避免超档被钳到 60s 提前重试。
+var retryTiers = []time.Duration{
+	5 * time.Second,
+	10 * time.Second,
+	20 * time.Second,
+	30 * time.Second,
+	40 * time.Second,
+	60 * time.Second,
+	120 * time.Second,
+	180 * time.Second,
+}
+
+// retryQueueName 把延迟向上取整到最近的档位，返回对应队列名；超出最大档位用最大档位。
+func retryQueueName(delay time.Duration) string {
+	tier := retryTiers[len(retryTiers)-1]
+	for _, t := range retryTiers {
+		if delay <= t {
+			tier = t
+			break
+		}
+	}
+	return "syncguard.jobs.retry." + strconv.FormatInt(int64(tier/time.Second), 10) + "s"
+}
 
 // declareTopology 声明 Exchange/Queue/Binding，确保运行前拓扑存在。
 //
@@ -113,21 +138,24 @@ func declareTopology(ch *amqp.Channel) error {
 		return fmt.Errorf("绑定主队列: %w", err)
 	}
 
-	// 7. 延迟重试队列。DLX 指向主交换机（不是 DLX），消息 TTL 过期后回主队列重试。
-	retryArgs := amqp.Table{
-		"x-dead-letter-exchange":    ExchangeName,
-		"x-dead-letter-routing-key": RoutingKey,
-	}
-
-	if _, err := ch.QueueDeclare(
-		RetryQueueName,
-		true,
-		false,
-		false,
-		false,
-		retryArgs,
-	); err != nil {
-		return fmt.Errorf("声明延迟队列: %w", err)
+	// 7. 延迟重试队列：按档位拆多个固定 x-message-ttl 的队列。DLX 指向主交换机（不是 DLX），
+	// 队列 TTL 到期后消息死信回主队列重试。拆档后同队列 TTL 相同、按入队顺序过期，互不阻塞。
+	for _, tier := range retryTiers {
+		retryArgs := amqp.Table{
+			"x-dead-letter-exchange":    ExchangeName,
+			"x-dead-letter-routing-key": RoutingKey,
+			"x-message-ttl":             int64(tier / time.Millisecond),
+		}
+		if _, err := ch.QueueDeclare(
+			retryQueueName(tier),
+			true,
+			false,
+			false,
+			false,
+			retryArgs,
+		); err != nil {
+			return fmt.Errorf("声明延迟队列: %w", err)
+		}
 	}
 
 	// CDC 交换机

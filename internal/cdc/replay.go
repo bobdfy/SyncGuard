@@ -24,9 +24,9 @@ func Replay(ch *amqp.Channel) (int, error) {
 		}
 
 		if err := producer.PublishRaw(context.Background(), msg.Body); err != nil {
-			slog.Error("补投失败，消息留在死信队列", "err", err)
-			_ = msg.Nack(false, true) // requeue=true 放回死信队列，别丢
-			continue
+			// 补投失败：消息 requeue 放回死信队列（不丢），直接返回而非 continue
+			msg.Nack(false, true)
+			return replayed, fmt.Errorf("补投失败: %w", err)
 		}
 		msg.Ack(false)
 		replayed++

@@ -42,7 +42,8 @@ func (d *JobDestination) Save(ctx context.Context, records []model.Record) error
 	d.totalCount += len(records)
 
 	// 3. 更新 sync_jobs：状态="running"，total_count=最新值
-	return d.jobStore.UpdateStatus(ctx, d.jobID, "running", d.totalCount, "", "")
+	// cursor 传当前缓存值（而非 ""），避免每页 Save 清空断点游标。
+	return d.jobStore.UpdateStatus(ctx, d.jobID, "running", d.totalCount, d.cursor, "")
 }
 
 // GetCheckpoint 从 sync_jobs 表读取断点游标
@@ -68,24 +69,19 @@ func (d *JobDestination) GetCheckpoint(ctx context.Context, taskName string) (st
 // 引擎每写完一页并更新完断点后调用。
 // 把当前页最后一条记录的 ID 存进 cursor，
 // 万一崩溃，重启后从这继续，最多丢一页。
-//
-// UpdateStatus(ctx, jobID, 状态, totalCount, cursor, errorMsg)
-// 状态还是 running（同步还没结束），cursor 用参数里的值
 func (d *JobDestination) UpdateCheckpoint(ctx context.Context, taskName string, cursor string) error {
+	// 先刷新内存缓存再落库：让 CompleteBatch 能拿到可信的当前游标，
+	d.cursor = cursor
 	return d.jobStore.UpdateStatus(ctx, d.jobID, "running", d.totalCount, cursor, "")
 }
 
 // CreateBatch 标记任务开始执行
 //
 // 引擎启动时调用。
-// 把 sync_jobs 状态改为 "running"，通知前端任务已开始。
-// StartAt 由 UpdateStatus 或 DB 层处理。
-//
-// 返回值是批次 ID，这里直接用 jobID
+// 把 sync_jobs 状态改为 "running"，通知前端任务已开始，并刷新 started_at
 func (d *JobDestination) CreateBatch(ctx context.Context) (int64, error) {
-	// 状态改为 running，但 total_count / cursor 沿用 GetCheckpoint 缓存的旧值，
-	// 不清零，保证崩溃重启后能从断点继续、进度不丢。
-	err := d.jobStore.UpdateStatus(ctx, d.jobID, "running", d.totalCount, d.cursor, "")
+	// 缓存的旧值，不清零，保证崩溃重启后能从断点继续、进度不丢。
+	err := d.jobStore.MarkStarted(ctx, d.jobID, d.totalCount, d.cursor)
 	if err != nil {
 		return 0, fmt.Errorf("CreateBatch: %w", err)
 	}
@@ -97,13 +93,11 @@ func (d *JobDestination) CreateBatch(ctx context.Context) (int64, error) {
 //
 // 引擎同步结束（成功或失败）时调用。
 // 把最终状态（"completed" 或 "failed"）和总数写回 sync_jobs。
-//
-// 参数 status 是引擎传进来的，直接透传即可，
-// 不要写死成 "completed"——引擎失败时传的是 "failed"。
 func (d *JobDestination) CompleteBatch(ctx context.Context, batchID int64, status string, totalCount int) error {
-	// UpdateStatus(ctx, jobID, 状态, totalCount, cursor, errorMsg)
-	// 状态用参数 status，不要硬编码
-	return d.jobStore.UpdateStatus(ctx, d.jobID, status, totalCount, "", "")
+	// 状态用参数 status，不要硬编码。
+	// cursor 传 d.cursor 而非 ""：失败/完成后保留断点，重试才能续传而非从头再来。
+	// totalCount 用 d.totalCount
+	return d.jobStore.UpdateStatus(ctx, d.jobID, status, d.totalCount, d.cursor, "")
 }
 
 // Close 透传到底层 Destination，释放其资源（如外部 PG 连接池）。

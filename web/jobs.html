@@ -157,7 +157,8 @@
                     <td>${j.total_count || '-'}</td>
                     <td><small>${formatTime(j.started_at)}</small></td>
                     <td>
-                        ${(j.status === 'pending' || j.status === 'failed') ? `<button style="padding:0.25rem 0.5rem;font-size:0.8rem;" onclick="startJob(${j.id})">▶ 启动</button>` : ''}
+                        ${(j.status === 'pending' || j.status === 'failed') ? `<button style="padding:0.25rem 0.5rem;font-size:0.8rem;" onclick="startJob(${j.id}, false)">▶ 启动</button>` : ''}
+                        ${(j.status === 'completed') ? `<button style="padding:0.25rem 0.5rem;font-size:0.8rem;" onclick="startJob(${j.id}, true)">↻ 重跑</button>` : ''}
                         <button class="outline secondary" style="padding:0.25rem 0.5rem;font-size:0.8rem;" onclick="deleteJob(${j.id})">🗑 删除</button>
                     </td>
                 </tr>
@@ -230,8 +231,11 @@
     }
 
     // ========== 启动同步 ==========
-    async function startJob(id) {
-        if (!confirm('确定启动这个同步任务吗？')) return;
+    async function startJob(id, rerun) {
+        const msg = rerun
+            ? '确定重新同步这个任务吗？将清空断点游标、从零开始全量同步。'
+            : '确定启动这个同步任务吗？';
+        if (!confirm(msg)) return;
 
         try {
             const res = await fetch(`/api/jobs/${id}/run`, {

@@ -64,6 +64,8 @@ func AuthRequired() gin.HandlerFunc {
 			func(t *jwt.Token) (any, error) {
 				return jwtSecret, nil
 			},
+			// 固定只认 HS256
+			jwt.WithValidMethods([]string{"HS256"}),
 		)
 
 		// 4. 解析失败或 token 无效 → 401

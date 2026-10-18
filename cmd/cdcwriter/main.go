@@ -41,18 +41,20 @@ func main() {
 		return
 	}
 
-	// 常驻消费：连目标库，消费 CDC 队列应用到镜像表
+	// 常驻消费：连中央库，按事件的 connection_id 解析各自目标库，消费 CDC 队列应用到镜像表
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	targetDB, err := repository.NewDB(ctx, os.Getenv("TARGET_DATABASE_URL"))
+	ctrlDB, err := repository.NewDB(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
-		slog.Error("目标数据库连接失败", "err", err)
+		slog.Error("中央数据库连接失败", "err", err)
 		os.Exit(1)
 	}
-	defer targetDB.Close()
+	defer ctrlDB.Close()
 
-	if err := cdc.Serve(ctx, ch, targetDB.Pool()); err != nil {
+	poolFor := cdc.TargetPoolResolver(ctrlDB.Pool())
+
+	if err := cdc.Serve(ctx, ch, poolFor); err != nil {
 		slog.Error("CDC 消费异常退出", "err", err)
 		os.Exit(1)
 	}

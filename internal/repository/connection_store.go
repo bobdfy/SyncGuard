@@ -15,9 +15,9 @@ func NewConnectionStore(db *DB) *ConnectionStore {
 	return &ConnectionStore{db: db}
 }
 
-func (s *ConnectionStore) Create(ctx context.Context, userID int, name string, sourceType string, sourceURL string) error {
+func (s *ConnectionStore) Create(ctx context.Context, userID int, name string, sourceType string, sourceURL string, cdcEnabled bool, targetURL string) error {
 	_, err := s.db.Pool().Exec(ctx,
-		`INSERT INTO connections(user_id, name,source_type, source_url) VALUES($1, $2, $3, $4)`, userID, name, sourceType, sourceURL)
+		`INSERT INTO connections(user_id, name, source_type, source_url, cdc_enabled, target_url) VALUES($1, $2, $3, $4, $5, $6)`, userID, name, sourceType, sourceURL, cdcEnabled, targetURL)
 	if err != nil {
 		return fmt.Errorf("ConnectionStore err: %w", err)
 	}
@@ -29,7 +29,7 @@ func (s *ConnectionStore) ListByUser(ctx context.Context, userID int) ([]model.C
 
 	// 1. Query — SELECT 多条，返回一个 rows 游标
 	rows, err := s.db.Pool().Query(ctx,
-		`SELECT id, user_id, name, source_type, source_url, created_at FROM connections WHERE user_id = $1`, userID,
+		`SELECT id, user_id, name, source_type, source_url, cdc_enabled, target_url, created_at FROM connections WHERE user_id = $1`, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w", err)
@@ -47,7 +47,7 @@ func (s *ConnectionStore) ListByUser(ctx context.Context, userID int) ([]model.C
 
 		// 5. rows.Scan — 把当前行的字段值「扫描」到 c 的字段里
 		//    顺序必须跟 SELECT 顺序一致
-		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.SourceType, &c.SourceURL, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.SourceType, &c.SourceURL, &c.CDCEnabled, &c.TargetURL, &c.CreatedAt); err != nil {
 			return nil, fmt.Errorf("%w", err)
 		}
 
@@ -66,19 +66,19 @@ func (s *ConnectionStore) ListByUser(ctx context.Context, userID int) ([]model.C
 
 func (s *ConnectionStore) GetByID(ctx context.Context, id int) (*model.Connection, error) {
 	var c model.Connection
-	err := s.db.Pool().QueryRow(ctx, `SELECT id, user_id, name, source_type, source_url, created_at FROM connections WHERE id = $1`, id).Scan(&c.ID, &c.UserID, &c.Name, &c.SourceType, &c.SourceURL, &c.CreatedAt)
+	err := s.db.Pool().QueryRow(ctx, `SELECT id, user_id, name, source_type, source_url, cdc_enabled, target_url, created_at FROM connections WHERE id = $1`, id).Scan(&c.ID, &c.UserID, &c.Name, &c.SourceType, &c.SourceURL, &c.CDCEnabled, &c.TargetURL, &c.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("ConnectionStore GetByID err: %w", err)
 	}
 	return &c, nil
 }
 
-// Update 修改数据源 name、source_type、source_url
+// Update 修改数据源 name、source_type、source_url、cdc_enabled、target_url
 // WHERE id=$? AND user_id=$? —— 双重条件，防止用户 A 改了用户 B 的数据源
-func (s *ConnectionStore) Update(ctx context.Context, id int, userID int, name string, sourceType string, sourceURL string) error {
+func (s *ConnectionStore) Update(ctx context.Context, id int, userID int, name string, sourceType string, sourceURL string, cdcEnabled bool, targetURL string) error {
 	_, err := s.db.Pool().Exec(ctx,
-		`UPDATE connections SET name=$1, source_type=$2, source_url=$3 WHERE id=$4 AND user_id=$5`,
-		name, sourceType, sourceURL, id, userID,
+		`UPDATE connections SET name=$1, source_type=$2, source_url=$3, cdc_enabled=$4, target_url=$5 WHERE id=$6 AND user_id=$7`,
+		name, sourceType, sourceURL, cdcEnabled, targetURL, id, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("ConnectionStore Update err: %w", err)

@@ -96,13 +96,17 @@ func RunTable(ctx context.Context, src TableSource, dst TableDestination, progre
 			totalCount += len(rows)
 		}
 
+		// 每页（含末页）都 checkpoint：崩溃重启不重放最后一页（重放靠幂等兜底，这里省一次重扫）。
+		if nextCursor != "" {
+			if err := progress.UpdateCheckpoint(ctx, taskName, nextCursor); err != nil {
+				return fmt.Errorf("UpdateCheckpoint: %w", err)
+			}
+			cursor = nextCursor
+		}
+
 		if !hasMore {
 			break
 		}
-		if err := progress.UpdateCheckpoint(ctx, taskName, nextCursor); err != nil {
-			return fmt.Errorf("UpdateCheckpoint: %w", err)
-		}
-		cursor = nextCursor
 	}
 
 	if err := progress.CompleteBatch(ctx, batchID, "completed", totalCount); err != nil {

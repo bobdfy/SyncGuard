@@ -6,12 +6,12 @@ import (
 	"log/slog"
 
 	"github.com/bobdfy/syncguard/internal/mq"
-	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// Serve 常驻消费 CDC 队列，把事件应用到目标库。阻塞直到 ctx 取消或消费 channel 关闭。
-func Serve(ctx context.Context, ch *amqp.Channel, pool *pgxpool.Pool) error {
+// Serve 常驻消费 CDC 队列，把事件应用到各自连接的目标库。阻塞直到 ctx 取消或消费 channel 关闭。
+// poolFor 按事件的 connection_id 解析目标库，实现多租户路由。
+func Serve(ctx context.Context, ch *amqp.Channel, poolFor TargetPoolFunc) error {
 	sub, err := mq.NewConsumer(ch, mq.CDCQueueName)
 	if err != nil {
 		return fmt.Errorf("创建 CDC 消费者失败: %w", err)
@@ -21,7 +21,7 @@ func Serve(ctx context.Context, ch *amqp.Channel, pool *pgxpool.Pool) error {
 		return fmt.Errorf("订阅 CDC 队列失败: %w", err)
 	}
 
-	handler := NewConsumer(NewApplier(pool))
+	handler := NewConsumer(NewApplier(poolFor))
 
 	slog.Info("CDC 消费者已启动", "queue", mq.CDCQueueName)
 

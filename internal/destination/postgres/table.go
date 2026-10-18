@@ -17,16 +17,18 @@ var _ engine.TableDestination = (*TableDestination)(nil)
 // TableDestination 数据库镜像目标：按源表结构建同构表 + 列对列写入。
 // 与信封版 Destination 不同，它不写 (id,version,updated_at,data) 四列，而是原样还原源表结构。
 type TableDestination struct {
-	dbURL  string
-	table  string
-	pool   *pgxpool.Pool
-	schema model.TableSchema // EnsureTable 时缓存，供 SaveRows 拼 SQL
+	dbURL      string
+	schemaName string
+	table      string
+	pool       *pgxpool.Pool
+	schema     model.TableSchema // EnsureTable 时缓存，供 SaveRows 拼 SQL
 }
 
-// NewTableDestination 校验表名 + 建立到目标库的连接池。
+// NewTableDestination 校验表名（可带 schema 前缀）+ 建立到目标库的连接池。
 func NewTableDestination(ctx context.Context, dbURL, table string) (*TableDestination, error) {
-	if !identRe.MatchString(table) {
-		return nil, fmt.Errorf("非法目标表名 %q（只允许字母/数字/下划线）", table)
+	schemaName, tableName, err := splitQualified(table)
+	if err != nil {
+		return nil, err
 	}
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
@@ -36,7 +38,19 @@ func NewTableDestination(ctx context.Context, dbURL, table string) (*TableDestin
 		pool.Close()
 		return nil, fmt.Errorf("连接目标库失败: %w", err)
 	}
-	return &TableDestination{dbURL: dbURL, table: table, pool: pool}, nil
+	return &TableDestination{dbURL: dbURL, schemaName: schemaName, table: tableName, pool: pool}, nil
+}
+
+// splitQualified 把 "schema.table" 拆成 schema + table；无 "." 前缀时 schema 默认 public。
+func splitQualified(name string) (schema, table string, err error) {
+	schema, table = "public", name
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		schema, table = name[:i], name[i+1:]
+	}
+	if !identRe.MatchString(schema) || !identRe.MatchString(table) {
+		return "", "", fmt.Errorf("非法目标表名 %q（只允许字母/数字/下划线，可带 schema 前缀）", name)
+	}
+	return schema, table, nil
 }
 
 // Close 释放连接池。
@@ -50,7 +64,7 @@ func (d *TableDestination) Close() error {
 // EnsureTable 按源表结构在目标库建同构表（幂等），并缓存结构供 SaveRows 用。
 func (d *TableDestination) EnsureTable(ctx context.Context, schema model.TableSchema) error {
 	d.schema = schema
-	ddl := buildCreateTableDDL(d.table, schema)
+	ddl := buildCreateTableDDL(d.schemaName, d.table, schema)
 	if _, err := d.pool.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("TableDestination.EnsureTable: %w", err)
 	}
@@ -69,7 +83,7 @@ func (d *TableDestination) SaveRows(ctx context.Context, rows []model.RawRow) er
 		return fmt.Errorf("SaveRows: 未初始化表结构（需先调 EnsureTable）")
 	}
 
-	sql := buildUpsertSQL(d.table, d.schema)
+	sql := buildUpsertSQL(d.schemaName, d.table, d.schema)
 
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
@@ -99,7 +113,7 @@ func (d *TableDestination) SaveRows(ctx context.Context, rows []model.RawRow) er
 
 // buildCreateTableDDL 依据表结构拼 CREATE TABLE IF NOT EXISTS 语句。
 // 列名/表名用 Identifier.Sanitize 防注入；类型串来自源库 format_type，可直接内嵌。
-func buildCreateTableDDL(table string, schema model.TableSchema) string {
+func buildCreateTableDDL(schemaName, table string, schema model.TableSchema) string {
 	parts := make([]string, 0, len(schema.Columns)+1)
 	for _, c := range schema.Columns {
 		def := pgx.Identifier{c.Name}.Sanitize() + " " + c.DataType
@@ -115,7 +129,7 @@ func buildCreateTableDDL(table string, schema model.TableSchema) string {
 		}
 		parts = append(parts, "PRIMARY KEY ("+strings.Join(pk, ", ")+")")
 	}
-	return "CREATE TABLE IF NOT EXISTS " + pgx.Identifier{table}.Sanitize() +
+	return "CREATE TABLE IF NOT EXISTS " + pgx.Identifier{schemaName, table}.Sanitize() +
 		" (" + strings.Join(parts, ", ") + ")"
 }
 
@@ -124,7 +138,7 @@ func buildCreateTableDDL(table string, schema model.TableSchema) string {
 //	INSERT INTO t (c1,c2) VALUES ($1,$2) ON CONFLICT (pk) DO UPDATE SET c1=EXCLUDED.c1,...
 //
 // 无主键、或除主键外无其它列时退化为 ON CONFLICT DO NOTHING。
-func buildUpsertSQL(table string, schema model.TableSchema) string {
+func buildUpsertSQL(schemaName, table string, schema model.TableSchema) string {
 	colNames := make([]string, len(schema.Columns))
 	placeholders := make([]string, len(schema.Columns))
 	for i, c := range schema.Columns {
@@ -144,7 +158,7 @@ func buildUpsertSQL(table string, schema model.TableSchema) string {
 	}
 
 	sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		pgx.Identifier{table}.Sanitize(),
+		pgx.Identifier{schemaName, table}.Sanitize(),
 		strings.Join(colNames, ", "),
 		strings.Join(placeholders, ", "))
 

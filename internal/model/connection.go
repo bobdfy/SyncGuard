@@ -8,5 +8,7 @@ type Connection struct {
 	Name       string    `json:"name"`
 	SourceType string    `json:"source_type"`
 	SourceURL  string    `json:"source_url"`
+	CDCEnabled bool      `json:"cdc_enabled"`
+	TargetURL  string    `json:"target_url"`
 	CreatedAt  time.Time `json:"created_at"`
 }

@@ -58,7 +58,21 @@ func (s *JobStore) UpdateStatus(ctx context.Context, jobID int, status string, t
 	return nil
 }
 
-// // UpdateStatusInTx 事务版 UpdateStatus：在调用方给定的事务里更新任务状态。
+// MarkStarted 任务开始执行：状态转 running 并刷新 started_at（本次运行开始时间）。
+//
+// 与 UpdateStatus 的区别：只在「开始」这一瞬间刷新 started_at，后续每页的 running
+// 更新走 UpdateStatus，不再碰 started_at，语义才是「本次运行开始」而非「创建时间」。
+func (s *JobStore) MarkStarted(ctx context.Context, jobID int, totalCount int, cursor string) error {
+	_, err := s.db.Pool().Exec(ctx,
+		`UPDATE sync_jobs SET status='running', total_count=$2, cursor=$3, error_msg='', started_at=NOW()
+		 WHERE id=$1`, jobID, totalCount, cursor)
+	if err != nil {
+		return fmt.Errorf("JobStore.MarkStarted: %w", err)
+	}
+	return nil
+}
+
+// UpdateStatusInTx 事务版 UpdateStatus：在调用方给定的事务里更新任务状态。
 // 用于「更新状态 + 写 outbox」必须同生共死的场景。
 // SQL 与 UpdateStatus 完全一致，只是执行入口从连接池换成事务。
 func (s *JobStore) UpdateStatusInTx(ctx context.Context, tx pgx.Tx, jobID int, status string, totalCount int, cursor string, errMsg string) error {

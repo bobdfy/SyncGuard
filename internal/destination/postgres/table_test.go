@@ -17,7 +17,7 @@ func TestBuildCreateTableDDL(t *testing.T) {
 		},
 		PrimaryKey: []string{"id"},
 	}
-	ddl := buildCreateTableDDL("orders", schema)
+	ddl := buildCreateTableDDL("public", "orders", schema)
 
 	if !strings.Contains(ddl, `"orders"`) {
 		t.Errorf("期望包含表名，实际: %s", ddl)
@@ -43,9 +43,9 @@ func TestBuildUpsertSQL(t *testing.T) {
 		},
 		PrimaryKey: []string{"id"},
 	}
-	sql := buildUpsertSQL("orders", schema)
+	sql := buildUpsertSQL("public", "orders", schema)
 
-	if !strings.Contains(sql, `INSERT INTO "orders" ("id", "name") VALUES ($1, $2)`) {
+	if !strings.Contains(sql, `INSERT INTO "public"."orders" ("id", "name") VALUES ($1, $2)`) {
 		t.Errorf("期望列对列 INSERT，实际: %s", sql)
 	}
 	if !strings.Contains(sql, `ON CONFLICT ("id") DO UPDATE SET "name" = EXCLUDED."name"`) {
@@ -62,7 +62,7 @@ func TestBuildUpsertSQLNoNonPKCols(t *testing.T) {
 		},
 		PrimaryKey: []string{"id"},
 	}
-	sql := buildUpsertSQL("t", schema)
+	sql := buildUpsertSQL("public", "t", schema)
 	if !strings.Contains(sql, "ON CONFLICT DO NOTHING") {
 		t.Errorf("仅主键列时应退化为 DO NOTHING，实际: %s", sql)
 	}

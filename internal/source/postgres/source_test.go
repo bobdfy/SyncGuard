@@ -13,15 +13,18 @@ func TestParseContent(t *testing.T) {
 	tests := []struct {
 		name        string
 		syncContent string
+		wantSchema  string
 		wantTable   string
 		wantPK      string
 		wantErr     bool
 	}{
-		{name: "只有表名，主键默认 id", syncContent: "users", wantTable: "users", wantPK: "id"},
-		{name: "表名+主键", syncContent: "orders:order_id", wantTable: "orders", wantPK: "order_id"},
-		{name: "带下划线表名", syncContent: "user_profiles:uid", wantTable: "user_profiles", wantPK: "uid"},
+		{name: "只有表名，主键默认 id", syncContent: "users", wantSchema: "public", wantTable: "users", wantPK: "id"},
+		{name: "表名+主键", syncContent: "orders:order_id", wantSchema: "public", wantTable: "orders", wantPK: "order_id"},
+		{name: "带下划线表名", syncContent: "user_profiles:uid", wantSchema: "public", wantTable: "user_profiles", wantPK: "uid"},
+		{name: "带 schema 前缀", syncContent: "other_schema.users:uid", wantSchema: "other_schema", wantTable: "users", wantPK: "uid"},
 		{name: "非法主键（连字符）", syncContent: "users:bad-name", wantErr: true},
 		{name: "非法表名（连字符）", syncContent: "bad-name", wantErr: true},
+		{name: "非法 schema（连字符）", syncContent: "bad-schema.users", wantErr: true},
 		{name: "空串", syncContent: "", wantErr: true},
 		{name: "数字开头表名", syncContent: "1table", wantErr: true},
 		{name: "主键含分号注入", syncContent: "users:1;DROP", wantErr: true},
@@ -29,10 +32,10 @@ func TestParseContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			table, pk, err := parseContent(tt.syncContent)
+			schema, table, pk, err := parseContent(tt.syncContent)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("期望报错，实际成功: table=%q pk=%q", table, pk)
+					t.Fatalf("期望报错，实际成功: schema=%q table=%q pk=%q", schema, table, pk)
 				}
 				// 配置错误属于永久错误，必须标记 ErrNonRetryable（Worker 才会进 DLQ 而非退避重试）
 				if !errors.Is(err, engine.ErrNonRetryable) {
@@ -43,8 +46,9 @@ func TestParseContent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("期望成功，实际报错: %v", err)
 			}
-			if table != tt.wantTable || pk != tt.wantPK {
-				t.Errorf("期望 (%q, %q)，实际 (%q, %q)", tt.wantTable, tt.wantPK, table, pk)
+			if schema != tt.wantSchema || table != tt.wantTable || pk != tt.wantPK {
+				t.Errorf("期望 (schema=%q, table=%q, pk=%q)，实际 (schema=%q, table=%q, pk=%q)",
+					tt.wantSchema, tt.wantTable, tt.wantPK, schema, table, pk)
 			}
 		})
 	}

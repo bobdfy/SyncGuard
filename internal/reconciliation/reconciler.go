@@ -96,6 +96,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, connectionID int, userID int
 
 	// 第 3 步：分页读取目标端（synced_records）→ 放进 map
 	// 按 user_id + connection_id 过滤，只对比当前数据源的数据，避免多源混账。
+	//
+	// 用 LIMIT/OFFSET 分页：对账期间若同步任务同时在写 synced_records，
+	// 插入/删除会让 OFFSET 漂移，可能漏行或重复。低优先级——对账本就该挑同步空闲窗口跑。
 	syncedStore := repository.NewSyncedStore(r.db)
 	targetMap := make(map[string]model.Record)
 	offset := 0

@@ -1,9 +1,9 @@
 package repository
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -38,6 +38,25 @@ func TestSyncedStoreSaveAndQuery(t *testing.T) {
 	cleanup()
 	t.Cleanup(cleanup)
 
+	// 前置 fixture：synced_records.connection_id 有 FK 指向 connections(id)，
+	// 而 connections.user_id 又指向 users(id)。SaveWithUser 前必须先有这两级行，
+	// 否则撞 FK（synced_records_connection_id_fkey）。先删残留（上次失败留下的），
+	// 删 users 会级联清掉 connections / synced_records。
+	_, _ = db.Pool().Exec(ctx, `DELETE FROM users WHERE id = $1 OR id = $2`, testUserID, testOtherUserID)
+	if _, err := db.Pool().Exec(ctx,
+		`INSERT INTO users (id, username, password_hash) VALUES ($1, 'fixture_a', 'x'), ($2, 'fixture_b', 'x')`,
+		testUserID, testOtherUserID); err != nil {
+		t.Fatalf("插入 users fixture 失败: %v", err)
+	}
+	if _, err := db.Pool().Exec(ctx,
+		`INSERT INTO connections (id, user_id, name, source_type, source_url) VALUES ($1, $3, 'fixture', 'mock', ''), ($2, $4, 'fixture', 'mock', '')`,
+		testConnID, testOtherConnID, testUserID, testOtherUserID); err != nil {
+		t.Fatalf("插入 connections fixture 失败: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool().Exec(context.Background(), `DELETE FROM users WHERE id = $1 OR id = $2`, testUserID, testOtherUserID)
+	})
+
 	store := NewSyncedStore(db)
 
 	// 写入 3 条（user=testUserID, conn=testConnID）
@@ -70,7 +89,14 @@ func TestSyncedStoreSaveAndQuery(t *testing.T) {
 				if r.Version != 9 {
 					t.Errorf("u1 期望 version=9，实际 %d", r.Version)
 				}
-				if !bytes.Equal(r.Data, json.RawMessage(`{"name":"张三改"}`)) {
+				var gotData, wantData any
+				if err := json.Unmarshal(r.Data, &gotData); err != nil {
+					t.Fatalf("解析 u1 实际内容失败: %v", err)
+				}
+				if err := json.Unmarshal(json.RawMessage(`{"name":"张三改"}`), &wantData); err != nil {
+					t.Fatalf("解析 u1 期望内容失败: %v", err)
+				}
+				if !reflect.DeepEqual(gotData, wantData) {
 					t.Errorf("u1 期望内容已覆盖，实际 %s", r.Data)
 				}
 			}

@@ -1,9 +1,10 @@
 package postgres
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -91,7 +92,15 @@ func TestSaveUpsertIntegration(t *testing.T) {
 	if version != 2 {
 		t.Errorf("a 期望 version=2（被覆盖），实际 %d", version)
 	}
-	if !bytes.Equal(data, []byte(`{"v":2}`)) {
+	// jsonb 读回会被 PG 规范化（加空格/重排键），不能按字节比较，反序列化后按语义比较。
+	var gotData, wantData any
+	if err := json.Unmarshal(data, &gotData); err != nil {
+		t.Fatalf("解析实际 data 失败: %v", err)
+	}
+	if err := json.Unmarshal([]byte(`{"v":2}`), &wantData); err != nil {
+		t.Fatalf("解析期望 data 失败: %v", err)
+	}
+	if !reflect.DeepEqual(gotData, wantData) {
 		t.Errorf("a 期望 data 被覆盖为 {\"v\":2}，实际 %s", data)
 	}
 }

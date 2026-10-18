@@ -54,6 +54,13 @@
                 <label>连接地址
                     <input type="text" name="source_url" placeholder="GitHub 填 owner/repo（如 golang/go）；PostgreSQL 填连接串（如 postgres://user:pass@host:5432/db）；Mock 可随意填" required>
                 </label>
+                <label>
+                    <input type="checkbox" name="cdc_enabled" role="switch">
+                    启用 CDC 增量同步（仅 PostgreSQL）
+                </label>
+                <label>镜像目标库连接串
+                    <input type="text" name="target_url" placeholder="启用 CDC 时必填，如 postgres://user:pass@host:5432/target_db?sslmode=disable" disabled>
+                </label>
                 <div class="grid">
                     <button type="submit" id="submit-btn">添加数据源</button>
                     <button type="button" id="cancel-edit-btn" class="secondary">取消编辑</button>
@@ -64,10 +71,10 @@
         <h2 style="margin-top:2rem;">已有数据源</h2>
         <table class="striped">
             <thead>
-                <tr><th>名称</th><th>类型</th><th>地址</th><th>创建时间</th><th>操作</th></tr>
+                <tr><th>名称</th><th>类型</th><th>地址</th><th>CDC</th><th>创建时间</th><th>操作</th></tr>
             </thead>
             <tbody id="conn-tbody">
-                <tr><td colspan="5" style="text-align:center;color:var(--pico-muted-color);">加载中...</td></tr>
+                <tr><td colspan="6" style="text-align:center;color:var(--pico-muted-color);">加载中...</td></tr>
             </tbody>
         </table>
     </main>
@@ -95,6 +102,7 @@
     const editIdInput = document.querySelector('input[name="edit_id"]');
 
     let editingId = null; // null = 新建模式，有值 = 编辑模式
+    let connList  = [];   // 当前列表缓存，编辑按钮按 data-id 从这里取数据
 
     // ========== 加载列表 ==========
     async function loadConnections() {
@@ -105,30 +113,32 @@
             const data = await res.json();
 
             if (!res.ok) {
-                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--pico-del-color);">${data.error || '加载失败'}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--pico-del-color);">${data.error || '加载失败'}</td></tr>`;
                 return;
             }
 
             const list = data.data || [];
             if (list.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--pico-muted-color);">暂无数据源，在上方添加第一个</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--pico-muted-color);">暂无数据源，在上方添加第一个</td></tr>';
                 return;
             }
 
+            connList = list;
             tbody.innerHTML = list.map(c => `
                 <tr>
                     <td>${escapeHtml(c.name)}</td>
                     <td>${escapeHtml(c.source_type)}</td>
                     <td><small>${escapeHtml(c.source_url)}</small></td>
+                    <td>${c.cdc_enabled ? '✅ 启用' : '—'}</td>
                     <td><small>${formatTime(c.created_at)}</small></td>
                     <td>
-                        <button class="action-btn" onclick="startEdit(${c.id}, '${escapeHtml(c.name)}', '${escapeHtml(c.source_type)}', '${escapeHtml(c.source_url)}')">✏️ 编辑</button>
+                        <button class="action-btn edit-btn" data-id="${c.id}">✏️ 编辑</button>
                         <button class="action-btn secondary" onclick="deleteConn(${c.id})">🗑 删除</button>
                     </td>
                 </tr>
             `).join('');
         } catch (err) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--pico-del-color);">网络错误</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--pico-del-color);">网络错误</td></tr>';
         }
     }
 
@@ -138,10 +148,20 @@
         errEl.style.display = 'none';
         okEl.style.display = 'none';
 
+        const cdcEnabled = form.cdc_enabled.checked;
+        const targetURL  = form.target_url.value.trim();
+        if (cdcEnabled && !targetURL) {
+            errEl.textContent = '启用 CDC 需要填写镜像目标库连接串';
+            errEl.style.display = 'block';
+            return;
+        }
+
         const body = {
             name:        form.name.value,
             source_type: form.source_type.value,
             source_url:  form.source_url.value,
+            cdc_enabled: cdcEnabled,
+            target_url:  targetURL,
         };
 
         const url    = editingId ? `/api/connections/${editingId}` : '/api/connections';
@@ -175,12 +195,24 @@
     });
 
     // ========== 编辑 ==========
-    function startEdit(id, name, sourceType, sourceURL) {
-        editingId = id;
-        editIdInput.value = id;
-        form.name.value = name;
-        form.source_type.value = sourceType;
-        form.source_url.value = sourceURL;
+    // 编辑按钮用事件委托：不再把 name/url 拼进 onclick 字符串——
+    // escapeHtml 不转义引号，连接名带单引号会截断 JS、带 ');...// 就是 XSS。
+    tbody.addEventListener('click', (e) => {
+        const btn = e.target.closest('.edit-btn');
+        if (!btn) return;
+        const conn = connList.find(c => c.id === Number(btn.dataset.id));
+        if (conn) startEdit(conn);
+    });
+
+    function startEdit(conn) {
+        editingId = conn.id;
+        editIdInput.value = conn.id;
+        form.name.value = conn.name;
+        form.source_type.value = conn.source_type;
+        form.source_url.value = conn.source_url;
+        form.cdc_enabled.checked = conn.cdc_enabled;
+        form.target_url.value = conn.target_url || '';
+        toggleTargetURL();
 
         formTitle.textContent = '✏️ 编辑数据源';
         submitBtn.textContent = '更新数据源';
@@ -190,11 +222,13 @@
     }
 
     cancelBtn.addEventListener('click', resetForm);
+    form.cdc_enabled.addEventListener('change', toggleTargetURL);
 
     function resetForm() {
         editingId = null;
         editIdInput.value = '';
         form.reset();
+        toggleTargetURL();
         formTitle.textContent = '➕ 添加新数据源';
         submitBtn.textContent = '添加数据源';
         cancelBtn.style.display = 'none';
@@ -222,6 +256,10 @@
     }
 
     // ========== 工具函数 ==========
+    function toggleTargetURL() {
+        form.target_url.disabled = !form.cdc_enabled.checked;
+    }
+
     function escapeHtml(str) {
         const div = document.createElement('div');
         div.textContent = str;

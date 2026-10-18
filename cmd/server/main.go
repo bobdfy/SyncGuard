@@ -69,14 +69,11 @@ func main() {
 	defer conn.Close()
 	defer ch.Close()
 
-	// 创建 Producer，往主交换机发消息
-	producer := mq.NewProducer(ch, mq.ExchangeName, mq.RoutingKey)
-
 	// 创建 Handler
 	authHandler := handler.NewAuthHandler(userStore)
 	connHandler := handler.NewConnectionHandler(connStore)
 
-	jobHandler := handler.NewJobHandler(jobStore, connStore, db, producer, reconciler, outboxStore)
+	jobHandler := handler.NewJobHandler(jobStore, connStore, db, reconciler, outboxStore)
 
 	r := gin.Default()
 

@@ -111,8 +111,8 @@ func TestFetchPaginationIntegration(t *testing.T) {
 	if hasMore2 {
 		t.Errorf("第二页期望 hasMore=false")
 	}
-	if cursor2 != "" {
-		t.Errorf("末页期望游标为空，实际 %q", cursor2)
+	if cursor2 != "3" {
+		t.Errorf("末页期望游标=3（末行主键，供引擎 checkpoint 最后一页），实际 %q", cursor2)
 	}
 
 	// limit<=0 → 报错

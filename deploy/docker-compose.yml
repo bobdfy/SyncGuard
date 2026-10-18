@@ -133,6 +133,57 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
+    
+  cdcreader:
+    build: 
+      context: ..
+      dockerfile: Dockerfile
+    image: syncguard:local
+    container_name: syncguard-cdcreader
+    command: ["/app/cdcreader"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:syncguard@postgres:5432/postgres?sslmode=disable
+      RABBITMQ_URL: amqp://syncguard:syncguard@rabbitmq:5672/
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '^/app/cdcreader' >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+  
+  cdcwriter:
+    build: 
+      context: ..
+      dockerfile: Dockerfile
+    image: syncguard:local
+    container_name: syncguard-cdcwriter
+    command: ["/app/cdcwriter"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:syncguard@postgres:5432/postgres?sslmode=disable
+      RABBITMQ_URL: amqp://syncguard:syncguard@rabbitmq:5672/
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '^/app/cdcwriter' >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
 
 volumes:
   postgres_data:

@@ -9,14 +9,53 @@ import (
 	dstpostgres "github.com/bobdfy/syncguard/internal/destination/postgres"
 	"github.com/bobdfy/syncguard/internal/engine"
 	srcpostgres "github.com/bobdfy/syncguard/internal/source/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
-// Snapshot 一次性存量快照：钉切点（建槽）→ 记录断点 → 搬存量到目标库。
+// TableRef 源库里一张要镜像的表（schema + 表名）。
+type TableRef struct {
+	Schema string
+	Table  string
+}
+
+// ListPublicationTables 列出某个 publication 覆盖的所有表（含 FOR ALL TABLES 展开）。
+func ListPublicationTables(ctx context.Context, dsn, publication string) ([]TableRef, error) {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("连接源库失败: %w", err)
+	}
+	defer conn.Close(ctx)
+
+	rows, err := conn.Query(ctx, `
+		SELECT schemaname, tablename
+		FROM pg_publication_tables
+		WHERE pubname = $1
+		ORDER BY schemaname, tablename`, publication)
+	if err != nil {
+		return nil, fmt.Errorf("查询 publication 表清单失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TableRef
+	for rows.Next() {
+		var t TableRef
+		if err := rows.Scan(&t.Schema, &t.Table); err != nil {
+			return nil, fmt.Errorf("扫描 publication 表清单失败: %w", err)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历 publication 表清单失败: %w", err)
+	}
+	return out, nil
+}
+
+// Snapshot 一次性存量快照：钉切点（建槽）→ 记录断点 → 搬 publication 覆盖的所有表到目标库。
 //
 // 之后正常启动 cdcreader 会从断点（切点 C）开始接增量，存量+增量无缝衔接：
 //   - C 之前提交的变更：由本快照搬过去；
 //   - C 之后（含复制期间）的变更：由增量流从 C 重放，重叠靠目标端 ON CONFLICT 幂等兜掉。
-func Snapshot(ctx context.Context, dsn, targetDSN, slotName, table string, store *EventStore) error {
+func Snapshot(ctx context.Context, dsn, targetDSN, slotName, publication string, store *EventStore) error {
 	if store == nil {
 		return fmt.Errorf("EventStore 不能为空")
 	}
@@ -43,24 +82,46 @@ func Snapshot(ctx context.Context, dsn, targetDSN, slotName, table string, store
 		slog.Warn("复制槽已存在，跳过钉切点，仅搬运存量", "slot", slotName)
 	}
 
-	// 2. 搬存量：复用引擎镜像轨道（TableSchema → 建同构表 → keyset 分页 → 幂等 upsert）
-	src, err := srcpostgres.NewSource(ctx, dsn, table)
+	// 2. 枚举 publication 覆盖的所有表（FOR ALL TABLES 时即源库全部用户表）
+	tables, err := ListPublicationTables(ctx, dsn, publication)
 	if err != nil {
-		return fmt.Errorf("创建源失败: %w", err)
+		return err
+	}
+	if len(tables) == 0 {
+		return fmt.Errorf("publication %q 没有覆盖任何表", publication)
+	}
+
+	// 3. 逐表搬存量：复用引擎镜像轨道（TableSchema → 建同构表 → keyset 分页 → 幂等 upsert）
+	for _, t := range tables {
+		if err := snapshotTable(ctx, dsn, targetDSN, t); err != nil {
+			return err
+		}
+	}
+
+	slog.Info("存量快照完成", "slot", slotName, "publication", publication, "tables", len(tables))
+	return nil
+}
+
+// snapshotTable 把单张表从源库搬到目标库（建同构表 + 列对列 keyset 分页）。
+func snapshotTable(ctx context.Context, dsn, targetDSN string, t TableRef) error {
+	qualified := t.Schema + "." + t.Table
+
+	src, err := srcpostgres.NewSource(ctx, dsn, qualified)
+	if err != nil {
+		return fmt.Errorf("创建源失败(%s): %w", qualified, err)
 	}
 	defer src.Close()
 
-	dst, err := dstpostgres.NewTableDestination(ctx, targetDSN, table)
+	dst, err := dstpostgres.NewTableDestination(ctx, targetDSN, qualified)
 	if err != nil {
-		return fmt.Errorf("创建目标失败: %w", err)
+		return fmt.Errorf("创建目标失败(%s): %w", qualified, err)
 	}
 	defer dst.Close()
 
-	if err := engine.RunTable(ctx, src, dst, noopProgress{}, "cdc-snapshot", 200); err != nil {
-		return fmt.Errorf("存量搬运失败: %w", err)
+	if err := engine.RunTable(ctx, src, dst, noopProgress{}, "cdc-snapshot:"+qualified, 200); err != nil {
+		return fmt.Errorf("存量搬运 %s 失败: %w", qualified, err)
 	}
-
-	slog.Info("存量快照完成", "slot", slotName, "table", table)
+	slog.Info("存量快照：已搬表", "table", qualified)
 	return nil
 }
 

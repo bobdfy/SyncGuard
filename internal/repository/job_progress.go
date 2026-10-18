@@ -13,8 +13,7 @@ var _ engine.Progress = (*JobProgress)(nil)
 // JobProgress 同步进度/断点的最小实现：只读写 sync_jobs 表，不做数据落地。
 //
 // 镜像轨道只需「进度 + 断点」（数据写入由 TableDestination 负责，走 SaveRows 而非信封 Save），
-// 因此从 JobDestination 里把进度部分抽出来单独成类型，避免给镜像轨道硬塞一个无意义的 store。
-// 逻辑与 JobDestination 的 4 个进度方法保持一致。
+// 因此从 JobDestination 里把进度部分抽出来单独成类型
 type JobProgress struct {
 	jobStore   *JobStore
 	jobID      int
@@ -40,12 +39,14 @@ func (p *JobProgress) GetCheckpoint(ctx context.Context, taskName string) (strin
 
 // UpdateCheckpoint 更新 sync_jobs 的 cursor 字段。
 func (p *JobProgress) UpdateCheckpoint(ctx context.Context, taskName string, cursor string) error {
+	// 先刷新内存缓存再落库，供 CompleteBatch 取可信游标。
+	p.cursor = cursor
 	return p.jobStore.UpdateStatus(ctx, p.jobID, "running", p.totalCount, cursor, "")
 }
 
-// CreateBatch 标记任务开始执行，返回 jobID 作为批次 ID。
+// CreateBatch 标记任务开始执行（状态转 running + 刷新 started_at），返回 jobID 作为批次 ID。
 func (p *JobProgress) CreateBatch(ctx context.Context) (int64, error) {
-	err := p.jobStore.UpdateStatus(ctx, p.jobID, "running", p.totalCount, p.cursor, "")
+	err := p.jobStore.MarkStarted(ctx, p.jobID, p.totalCount, p.cursor)
 	if err != nil {
 		return 0, fmt.Errorf("CreateBatch: %w", err)
 	}
@@ -53,6 +54,9 @@ func (p *JobProgress) CreateBatch(ctx context.Context) (int64, error) {
 }
 
 // CompleteBatch 标记任务结束，status 由引擎透传（completed/failed）。
+// cursor 传 p.cursor 保留断点；totalCount 用「上次累计 + 当次增量」，
+// 因为镜像轨道没有 Save 累加点：p.totalCount 是 GetCheckpoint 播种的累计值，
+// totalCount 参数是当次续跑增量。
 func (p *JobProgress) CompleteBatch(ctx context.Context, batchID int64, status string, totalCount int) error {
-	return p.jobStore.UpdateStatus(ctx, p.jobID, status, totalCount, "", "")
+	return p.jobStore.UpdateStatus(ctx, p.jobID, status, p.totalCount+totalCount, p.cursor, "")
 }

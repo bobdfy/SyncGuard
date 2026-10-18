@@ -11,18 +11,26 @@ import (
 
 // 一条解析后的数据变更事件
 type Event struct {
+	// ConnectionID 是产生该事件的数据源连接，多租户据此路由到各自目标库
+	ConnectionID int `json:"connection_id"`
+
 	// LSN 是该事件在源库日志中的唯一位置标识
 	LSN string `json:"lsn"`
 
 	// Operation 是变更类型
 	Operation string `json:"operation"`
 
-	// Schema 是变更所属的数据库名
+	// Schema 是变更所属的 schema（命名空间，如 public），不是数据库名
 	Schema string `json:"schema"`
 
 	Table string `json:"table"`
 
 	Columns []ColumnValue `json:"columns"`
+
+	// Relation 是 reader 从 RelationMessage 提取的表结构元数据（列名 + 类型 OID + 是否主键列）。
+	// 随事件一路传到 applier，供「目标表尚未建（快照没覆盖的新表）」时自动建同构表。
+	// 老事件（本字段加入前投递的）为 nil，applier 对 nil 不做自动建表。
+	Relation *Relation `json:"relation,omitempty"`
 }
 
 // 一列的值
@@ -30,6 +38,19 @@ type ColumnValue struct {
 	Name  string `json:"name"`
 	Value any    `json:"value,omitempty"`
 	Null  bool   `json:"null,omitempty"`
+}
+
+// Relation 是一张表的精简结构元数据：只含建表所需的列名 + 类型 + 主键标记。
+type Relation struct {
+	Columns []RelationColumn `json:"columns"`
+}
+
+// RelationColumn 是 Relation 里的一列。
+type RelationColumn struct {
+	Name    string `json:"name"`
+	TypeOID uint32 `json:"type_oid"`
+	// IsKey 表示该列是 replica identity（通常是主键）的一部分。
+	IsKey bool `json:"is_key"`
 }
 
 // Handler 处理一条变更事件

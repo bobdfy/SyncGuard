@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/bobdfy/syncguard/internal/model"
 	"github.com/bobdfy/syncguard/internal/mq"
 	"github.com/bobdfy/syncguard/internal/reconciliation"
 	"github.com/bobdfy/syncguard/internal/repository"
@@ -16,20 +17,18 @@ type JobHandler struct {
 	JobStore   *repository.JobStore
 	ConnStore  *repository.ConnectionStore
 	DB         *repository.DB             // 供 ListRecords 创建 SyncedStore 用
-	MQ         *mq.Producer               // V2：发消息到 RabbitMQ，替代原来的 goroutine
 	Reconciler *reconciliation.Reconciler // V3：对账引擎
 	Outbox     *repository.OutboxStore
 }
 
 // NewJobHandler 创建 JobHandler。
-// V2 增加了 mqProducer 参数：RunJob 不再异步 goroutine，
-// 而是通过 MQ 发消息给 Worker 执行。
-func NewJobHandler(jobStore *repository.JobStore, connStore *repository.ConnectionStore, db *repository.DB, mqProducer *mq.Producer, reconciler *reconciliation.Reconciler, outbox *repository.OutboxStore) *JobHandler {
+// RunJob 不再直接持有 Producer 发消息，而是写 Transactional Outbox，
+// 由 worker 进程里的搬运工（dispatcher）统一投递到 MQ，消息不丢。
+func NewJobHandler(jobStore *repository.JobStore, connStore *repository.ConnectionStore, db *repository.DB, reconciler *reconciliation.Reconciler, outbox *repository.OutboxStore) *JobHandler {
 	return &JobHandler{
 		JobStore:   jobStore,
 		ConnStore:  connStore,
 		DB:         db,
-		MQ:         mqProducer,
 		Reconciler: reconciler,
 		Outbox:     outbox,
 	}
@@ -201,8 +200,13 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 		return
 	}
 
-	//4. 写 outbox：搬运工负责发消息，消息不丢
-	// taskName 用 jobID 的字符串表示，传给 Worker 后填入 engine.Run()
+	// 4. 状态分流：running 中的任务不能再启动；completed 的重新运行 = 清游标全量重跑。
+	if job.Status == model.JobStatusRunning {
+		c.JSON(http.StatusConflict, gin.H{"error": "任务正在运行中，请稍后再试"})
+		return
+	}
+
+	//5. 写 outbox：搬运工负责发消息，消息不丢
 	taskName := strconv.Itoa(id)
 
 	// DelayMs=0 表示搬运工扫到后立即发主队列
@@ -218,6 +222,15 @@ func (h *JobHandler) RunJob(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback(c.Request.Context())
+
+	// 已完成任务重跑：重置为 pending + 清游标/计数（全量重跑），与 outbox 同事务，
+	// 保证「状态重置」和「消息发出」同生共死——否则重置了却没消息，任务就卡在 pending。
+	if job.Status == model.JobStatusCompleted {
+		if err := h.JobStore.UpdateStatusInTx(c.Request.Context(), tx, id, model.JobStatusPending, 0, "", ""); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "重置任务失败"})
+			return
+		}
+	}
 
 	if err := h.Outbox.Insert(c.Request.Context(), tx, payload); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "记录消息失败"})
@@ -256,6 +269,15 @@ func (h *JobHandler) ListRecords(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数格式错误"})
 		return
 	}
+	// clamp：limit 限制在 [1, 500]，防止 limit=10000000 全表拉取；offset 负数归零。
+	if limit < 1 {
+		limit = 1
+	} else if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	// 创建 SyncedStore
 	syncedStore := repository.NewSyncedStore(h.DB)
 	// 调 store.ListRecords(ctx, limit, offset)
@@ -276,7 +298,7 @@ func (h *JobHandler) ListRecords(c *gin.Context) {
 //  3. 调 Reconciler.Reconcile(ctx, connectionID) 执行对账
 //  4. 返回差异列表 JSON
 func (h *JobHandler) Reconcile(c *gin.Context) {
-	// ========== 1. 取 userID（JWT 中间件注入） ==========
+	// 取 userID（JWT 中间件注入）
 	userID, ok := c.Get("userID")
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
@@ -284,14 +306,14 @@ func (h *JobHandler) Reconcile(c *gin.Context) {
 	}
 	userIDint := userID.(int)
 
-	// ========== 2. 从 URL 取 jobID ==========
+	// 从 URL 取 jobID
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数格式错误"})
 		return
 	}
 
-	// ========== 3. 查 DB：任务存在 + 属于当前用户 ==========
+	// 查 DB：任务存在 + 属于当前用户
 	job, err := h.JobStore.GetByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
@@ -302,14 +324,14 @@ func (h *JobHandler) Reconcile(c *gin.Context) {
 		return
 	}
 
-	// ========== 4. 执行对账 ==========
+	// 执行对账
 	diffs, err := h.Reconciler.Reconcile(c.Request.Context(), job.ConnectionID, userIDint, job.SyncContent, job.TargetConnectionID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "对账出现错误"})
 		return
 	}
 
-	// ========== 5. 返回差异 ==========
+	// 返回差异
 	c.JSON(http.StatusOK, gin.H{
 		"job_id":           id,
 		"connection_id":    job.ConnectionID,

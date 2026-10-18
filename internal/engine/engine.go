@@ -76,16 +76,19 @@ func (e *Engine) Run(ctx context.Context, taskName string) error {
 			totalCount += len(records)
 		}
 
-		//(d)判断是否为最后一页
+		//(d)推进断点：每页（含最后一页）都 checkpoint，避免崩溃后重放最后一页。
+		// nextCursor 为空（空表 / 页码类源末页）时跳过，防止把游标清成空串。
+		if nextCursor != "" {
+			if err := e.dst.UpdateCheckpoint(ctx, taskName, nextCursor); err != nil {
+				return fmt.Errorf("UpdateCheckpoint: %w", err)
+			}
+			cursor = nextCursor
+		}
+
+		//(e)判断是否为最后一页
 		if !hasMore {
 			break
 		}
-
-		//(e)更新断点 + 进入下一轮
-		if err := e.dst.UpdateCheckpoint(ctx, taskName, nextCursor); err != nil {
-			return fmt.Errorf("UpdateCheckpoint: %w", err)
-		}
-		cursor = nextCursor
 	}
 
 	if err := e.dst.CompleteBatch(ctx, batchID, "completed", totalCount); err != nil {

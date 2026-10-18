@@ -30,8 +30,10 @@ func (c *Consumer) Handle(msg amqp.Delivery) {
 		return
 	}
 
-	// 就地重试：失败后按 mq.BackoffDelay 退避再试同一条消息
+	// 就地重试：失败后按 mq.BackoffDelay 退避再试同一条消息。
 	// 原地重试是为了保序：CDC 的 INSERT/UPDATE/DELETE 有先后依赖。
+	// 代价：单条坏消息会堵住整条队列最长 ~7 分钟（MaxAttempts 次 × 递增退避），
+	// 这是保序换来的刻意权衡，暂不引入并行消费。
 	for attempt := 0; ; attempt++ {
 		err := c.applier.Apply(context.Background(), ev)
 		if err == nil {
@@ -40,7 +42,7 @@ func (c *Consumer) Handle(msg amqp.Delivery) {
 			return
 		}
 
-		if attempt >= mq.MaxAttempts {
+		if attempt+1 >= mq.MaxAttempts {
 			slog.Error("应用 CDC 事件失败，进死信", "lsn", ev.LSN, "operation", ev.Operation, "table", ev.Schema+"."+ev.Table, "err", err)
 			msg.Nack(false, false)
 			return
